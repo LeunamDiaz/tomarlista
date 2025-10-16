@@ -1,0 +1,31 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Reglas para la colección de estudiantes
+    match /students/{studentId} {
+      // Permitir lectura a todos los usuarios
+      allow read: if true;
+      
+      // Permitir escritura solo si el documento existe y se está actualizando
+      // o si se está creando un nuevo documento
+      allow create: if request.resource.data.keys().hasAll(['matricula', 'nombre']) 
+                     && request.resource.data.matricula is string 
+                     && request.resource.data.nombre is string
+                     && request.resource.data.asistencias is list;
+      
+      allow update: if request.resource.data.keys().hasAll(['matricula', 'nombre']) 
+                      && request.resource.data.matricula is string 
+                      && request.resource.data.nombre is string
+                      && request.resource.data.asistencias is list;
+      
+      allow delete: if true; // Permitir eliminación para administradores
+    }
+    
+    // Bloquear acceso a otras colecciones
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

@@ -1,0 +1,50 @@
+# Configuración de WhatsApp para Notificaciones de Ausencia
+# Copia este archivo como .env.local y reemplaza con tus credenciales reales
+
+# ========================================
+# OPCIÓN 1: WhatsApp Business API (Meta)
+# ========================================
+# Recomendada - Oficial de Meta, más confiable
+WHATSAPP_ACCESS_TOKEN=
+WHATSAPP_PHONE_NUMBER_ID=
+WHATSAPP_BUSINESS_ACCOUNT_ID=
+WHATSAPP_WEBHOOK_VERIFY_TOKEN=
+
+# ========================================
+# OPCIÓN 2: Twilio WhatsApp API
+# ========================================
+# Fácil de configurar, más costoso
+TWILIO_ACCOUNT_SID=
+TWILIO_AUTH_TOKEN=
+TWILIO_WHATSAPP_NUMBER=
+
+# ========================================
+# OPCIÓN 3: API Gateway (360dialog, etc.)
+# ========================================
+# Proceso rápido, costos variables
+WHATSAPP_API_GATEWAY_URL=
+WHATSAPP_API_GATEWAY_KEY=
+
+# ========================================
+# INSTRUCCIONES
+# ========================================
+# 1. Elige UNA de las tres opciones arriba
+# 2. Configura las variables correspondientes
+# 3. Deja las otras opciones vacías
+# 4. Consulta docs/whatsapp-setup.md para instrucciones detalladas
+# 5. Reinicia el servidor después de configurar
+
+# ========================================
+# COSTOS ESTIMADOS
+# ========================================
+# WhatsApp Business API: ~$0.005 USD por mensaje
+# Twilio WhatsApp: ~$0.005 USD por mensaje  
+# API Gateway: Consultar con proveedor
+# 
+# Para 100 notificaciones/mes: ~$0.50 USD
+# Para 1000 notificaciones/mes: ~$5 USD
+
+
+
+
+
