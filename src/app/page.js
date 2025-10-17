@@ -719,29 +719,32 @@ Sistema de Asistencia Escolar
               return code?.data || "";
             };
 
-            // 1) Intento full frame
+            // 1) Intento región central priorizada (estilo visor WeChat/Alipay)
+            const sideCenter = Math.floor(Math.min(targetW, targetH) * 0.72);
+            const sxC = Math.floor((targetW - sideCenter) / 2);
+            const syC = Math.floor((targetH - sideCenter) / 2);
+            const cropCenter = ctx.getImageData(sxC, syC, sideCenter, sideCenter);
+            canvas.width = sideCenter;
+            canvas.height = sideCenter;
+            ctx.putImageData(cropCenter, 0, 0);
             text = tryDecode();
 
-            // 2) Intento región central cuadrada (mejor enfoque en móviles)
+            // 2) Intento full frame si no encontró
             if (!text) {
-              const side = Math.min(targetW, targetH);
-              const sx = Math.floor((targetW - side) / 2);
-              const sy = Math.floor((targetH - side) / 2);
-              const crop = ctx.getImageData(sx, sy, side, side);
-              // Redibujar crop al canvas para decodificar
-              canvas.width = side;
-              canvas.height = side;
-              ctx.putImageData(crop, 0, 0);
+              canvas.width = targetW;
+              canvas.height = targetH;
+              ctx.setTransform(1, 0, 0, 1, 0, 0);
+              ctx.drawImage(video, 0, 0, targetW, targetH);
               text = tryDecode();
             }
 
             // 3) Cada 3er frame, probar rotación 90° para QR girados
             frameCount++;
             if (!text && frameCount % 3 === 0) {
-              canvas.width = targetH;
-              canvas.height = targetW;
-              ctx.setTransform(0, 1, -1, 0, targetH, 0); // rotar 90°
-              ctx.drawImage(video, 0, 0, targetW, targetH);
+              canvas.width = sideCenter;
+              canvas.height = sideCenter;
+              ctx.setTransform(0, 1, -1, 0, sideCenter, 0); // rotar 90° crop centro
+              ctx.drawImage(video, sxC, syC, sideCenter, sideCenter, 0, 0, sideCenter, sideCenter);
               text = tryDecode();
               ctx.setTransform(1, 0, 0, 1, 0, 0);
             }
@@ -1307,6 +1310,15 @@ Sistema de Asistencia Escolar
           />
         <canvas ref={canvasRef} className="hidden" />
         <audio ref={audioRef} src="/assets/sonido.mp3" preload="auto" className="hidden" />
+        {/* Marco de enfoque estilo visor WeChat/Alipay */}
+        <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+          <div className="relative w-[72vw] max-w-[480px] aspect-square">
+            <div className="absolute -top-1 -left-1 h-8 w-8 border-t-4 border-l-4 border-green-400 rounded-tl"></div>
+            <div className="absolute -top-1 -right-1 h-8 w-8 border-t-4 border-r-4 border-green-400 rounded-tr"></div>
+            <div className="absolute -bottom-1 -left-1 h-8 w-8 border-b-4 border-l-4 border-green-400 rounded-bl"></div>
+            <div className="absolute -bottom-1 -right-1 h-8 w-8 border-b-4 border-r-4 border-green-400 rounded-br"></div>
+          </div>
+        </div>
         </div>
       )}
     </div> 
