@@ -527,6 +527,7 @@ Sistema de Asistencia Escolar
   const [scannerOpen, setScannerOpen] = useState(false);
   const videoRef = React.useRef(null);
   const canvasRef = React.useRef(null);
+  const audioRef = React.useRef(null);
   const lastScanAtRef = React.useRef(0);
   const lastTextRef = React.useRef("");
   const detectorRef = React.useRef(null);
@@ -569,6 +570,14 @@ Sistema de Asistencia Escolar
   // Sonido de beep cuando se escanea exitosamente
   const playScanSound = useCallback(() => {
     try {
+      const refEl = audioRef.current;
+      if (refEl) {
+        try {
+          refEl.currentTime = 0;
+          refEl.play();
+          return;
+        } catch (e) {}
+      }
       const audio = new Audio('/assets/sonido.mp3');
       audio.play().catch(e => {
         console.warn("No se pudo reproducir el sonido:", e);
@@ -695,8 +704,8 @@ Sistema de Asistencia Escolar
           let text = "";
           if (detectorRef.current) {
             try {
-              const bitmap = await createImageBitmap(canvas);
-              const codes = await detectorRef.current.detect(bitmap);
+              // Usar el elemento de video directamente (mejor desempeño en móviles)
+              const codes = await detectorRef.current.detect(video);
               if (codes && codes.length > 0) {
                 text = codes[0].rawValue || codes[0].rawValue;
               }
@@ -783,6 +792,17 @@ Sistema de Asistencia Escolar
       startScanner();
     }
   }, [scannerOpen, scanning, scannerFailed, startScanner]);
+
+  // Desbloquear audio en móviles cuando se abre el escáner (autoplay policies)
+  useEffect(() => {
+    if (!scannerOpen) return;
+    const el = audioRef.current;
+    if (!el) return;
+    el.play().then(() => {
+      el.pause();
+      el.currentTime = 0;
+    }).catch(() => {});
+  }, [scannerOpen]);
 
   // Cerrar scanner al desmontar
   useEffect(() => {
@@ -1242,81 +1262,22 @@ Sistema de Asistencia Escolar
 
       {/* Scanner QR modal */}
       {scannerOpen && (
-        <div className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center p-2 sm:p-4">
-          <div className="bg-white rounded-xl w-full max-w-lg mx-auto shadow-2xl max-h-[90vh] overflow-hidden">
-            <div className="flex justify-between items-center p-4 border-b bg-green-50">
-              <h4 className="font-semibold text-lg text-green-800">📷 Escáner QR</h4>
-              <button
-                onClick={() => { stopScanner(); }}
-                className="px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 font-medium text-sm"
-              >
-                ✕ Cerrar
-              </button>
-            </div>
-            <div className="p-4">
-              <div className="relative">
-                <video 
-                  ref={videoRef}
-                  className="w-full h-64 sm:h-80 bg-gray-100 rounded-lg overflow-hidden border-2 border-green-300"
-                  style={{ display: scanning ? 'block' : 'none' }}
-                  autoPlay
-                  playsInline
-                  muted
-                />
-                <canvas 
-                  ref={canvasRef}
-                  className="hidden"
-                />
-                {/* Overlay eliminado para no tapar la vista */}
-              </div>
-              <div className="mt-4 text-center space-y-2">
-                {scannerFailed ? (
-                  <div className="p-4 bg-red-50 rounded-lg border border-red-200">
-                    <p className="text-sm text-red-700 font-medium mb-2">
-                      ❌ No se pudo iniciar la cámara
-                    </p>
-                    <p className="text-xs text-red-600 mb-3">
-                      Verifique que su navegador tenga permisos de cámara y que no esté siendo usada por otra aplicación.
-                    </p>
-                    <button
-                      onClick={() => {
-                        setScannerFailed(false);
-                        startScanner();
-                      }}
-                      className="px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 font-medium text-sm"
-                    >
-                      🔄 Reintentar
-                    </button>
-                  </div>
-                ) : (
-                  <>
-                    <p className="text-sm text-gray-700 font-medium">
-                      📱 Apunte el código QR del alumno al centro
-                    </p>
-                    <p className="text-xs text-gray-500">
-                      🔊 Se escuchará un beep al registrar la asistencia
-                    </p>
-                    <p className="text-xs text-green-600 font-medium">
-                      ✅ La cámara permanece abierta para más alumnos
-                    </p>
-                    <div className="mt-3 p-3 bg-blue-50 rounded-lg">
-                      <p className="text-xs text-blue-700 font-medium mb-1">
-                        🔐 <strong>Permisos de Cámara:</strong>
-                      </p>
-                      <p className="text-xs text-blue-600">
-                        Si aparece un mensaje de permisos, haga clic en <strong>&quot;Permitir&quot;</strong> para usar la cámara
-                      </p>
-                    </div>
-                    <div className="mt-2 p-2 bg-yellow-50 rounded-lg">
-                      <p className="text-xs text-yellow-700">
-                        💡 <strong>Tip:</strong> Asegúrese de que el código QR esté bien iluminado y enfocado
-                      </p>
-                    </div>
-                  </>
-                )}
-              </div>
-            </div>
-          </div>
+        <div className="fixed inset-0 z-50 bg-black flex items-center justify-center">
+          <button
+            onClick={() => { stopScanner(); }}
+            className="absolute top-4 right-4 z-10 px-4 py-2 bg-red-600 text-white rounded-lg shadow"
+          >
+            ✕ Cerrar
+          </button>
+          <video 
+            ref={videoRef}
+            className="w-full h-full object-cover"
+            autoPlay
+            playsInline
+            muted
+          />
+        <canvas ref={canvasRef} className="hidden" />
+        <audio ref={audioRef} src="/assets/sonido.mp3" preload="auto" className="hidden" />
         </div>
       )}
     </div> 
