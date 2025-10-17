@@ -670,9 +670,9 @@ Sistema de Asistencia Escolar
       // Solicitar acceso a la cámara
       const stream = await navigator.mediaDevices.getUserMedia({
         video: {
-          facingMode: "environment",
-          width: { ideal: 1280 },
-          height: { ideal: 720 }
+          facingMode: { ideal: "environment" },
+          width: { ideal: 1920 },
+          height: { ideal: 1080 }
         }
       });
 
@@ -689,16 +689,18 @@ Sistema de Asistencia Escolar
       setVideoReady(true);
 
       // Función para procesar cada frame
+      let frameCount = 0;
       const tick = async () => {
         if (video.readyState === video.HAVE_ENOUGH_DATA) {
           // Downscale para rendimiento
           const vw = video.videoWidth || 640;
           const vh = video.videoHeight || 480;
-          const targetW = Math.min(800, vw);
+          const targetW = Math.min(1280, vw);
           const scale = targetW / vw;
           const targetH = Math.round(vh * scale);
           canvas.width = targetW;
           canvas.height = targetH;
+          ctx.setTransform(1, 0, 0, 1, 0, 0);
           ctx.drawImage(video, 0, 0, targetW, targetH);
           
           let text = "";
@@ -711,11 +713,38 @@ Sistema de Asistencia Escolar
               }
             } catch {}
           } else if (jsQR) {
-            const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-            const code = jsQR(imageData.data, imageData.width, imageData.height, {
-              inversionAttempts: "attemptBoth",
-            });
-            if (code) text = code.data;
+            const tryDecode = () => {
+              const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+              const code = jsQR(imageData.data, imageData.width, imageData.height, { inversionAttempts: "attemptBoth" });
+              return code?.data || "";
+            };
+
+            // 1) Intento full frame
+            text = tryDecode();
+
+            // 2) Intento región central cuadrada (mejor enfoque en móviles)
+            if (!text) {
+              const side = Math.min(targetW, targetH);
+              const sx = Math.floor((targetW - side) / 2);
+              const sy = Math.floor((targetH - side) / 2);
+              const crop = ctx.getImageData(sx, sy, side, side);
+              // Redibujar crop al canvas para decodificar
+              canvas.width = side;
+              canvas.height = side;
+              ctx.putImageData(crop, 0, 0);
+              text = tryDecode();
+            }
+
+            // 3) Cada 3er frame, probar rotación 90° para QR girados
+            frameCount++;
+            if (!text && frameCount % 3 === 0) {
+              canvas.width = targetH;
+              canvas.height = targetW;
+              ctx.setTransform(0, 1, -1, 0, targetH, 0); // rotar 90°
+              ctx.drawImage(video, 0, 0, targetW, targetH);
+              text = tryDecode();
+              ctx.setTransform(1, 0, 0, 1, 0, 0);
+            }
           }
 
           if (text) {
