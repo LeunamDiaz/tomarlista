@@ -550,26 +550,32 @@ Sistema de Asistencia Escolar
     // Reproducir sonido de beep
     playScanSound();
     
+    // Registrar asistencia
+    const matriculaLeida = result.trim();
+    
+    // Buscar el estudiante para mostrar su nombre
+    const student = students.find(s => s.matricula === matriculaLeida);
+    const studentName = student ? student.nombre : 'Estudiante';
+    
     // Mostrar resultado temporal en el elemento result
     const resultElement = document.getElementById('result');
     if (resultElement) {
       resultElement.innerHTML = `
-        <div style="color: #4CAF50; margin-bottom: 10px; font-weight: bold;">✅ ¡Escaneo exitoso!</div>
-        <p style="color: #2196F3; word-break: break-all;">${result}</p>
+        <div style="color: #4CAF50; margin-bottom: 10px; font-weight: bold;">✅ ¡Asistencia registrada!</div>
+        <p style="color: #2196F3; font-weight: bold;">${studentName}</p>
+        <p style="color: #666; font-size: 0.9em;">Matrícula: ${matriculaLeida}</p>
       `;
       
-      // Limpiar el resultado después de 3 segundos
+      // Limpiar el resultado después de 4 segundos
       setTimeout(() => {
         resultElement.innerHTML = '';
-      }, 3000);
+      }, 4000);
     }
     
-    // Registrar asistencia
-    const matriculaLeida = result.trim();
     await registerAttendance(matriculaLeida);
     
     // NO cerrar el scanner - mantenerlo abierto para más escaneos
-  }, [registerAttendance, playScanSound]);
+  }, [registerAttendance, playScanSound, students]);
 
   // Función de error del escaneo
   const onScanFailure = useCallback((error) => {
@@ -1073,16 +1079,13 @@ Sistema de Asistencia Escolar
           </button>
           
           <div className="w-full h-full flex flex-col items-center justify-center p-4">
-            <div className="text-center mb-4 sm:mb-6">
-              <h1 className="text-xl sm:text-2xl font-bold mb-2">📷 Escáner QR</h1>
-              <p className="text-sm sm:text-base text-gray-600">Apunta la cámara al código QR del estudiante</p>
+            <div className="text-center mb-6">
+              <h1 className="text-2xl font-bold mb-2">📷 Escáner de Código QR</h1>
+              <p className="text-gray-600">Apunta la cámara al código QR del estudiante para registrar su asistencia</p>
             </div>
             
-            <div className="w-full max-w-2xl flex-1 flex flex-col items-center justify-center">
-              <div id="reader" className="w-full h-full max-h-[60vh] sm:max-h-[70vh]"></div>
-            </div>
-            
-            <div id="result" className="w-full max-w-2xl mt-4 text-center text-sm sm:text-base p-3 bg-gray-100 rounded-lg"></div>
+            <div id="reader" className="w-full max-w-2xl"></div>
+            <div id="result" className="text-center text-lg mt-6 p-4 bg-gray-100 rounded-lg max-w-2xl"></div>
           </div>
         </div>
       )}
