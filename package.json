@@ -9,15 +9,18 @@
     "lint": "eslint"
   },
   "dependencies": {
-    "@dataconnect/generated": "file:src/dataconnect-generated",
     "firebase": "^12.4.0",
     "framer-motion": "^12.23.24",
+    "html5-qrcode": "^2.3.8",
     "jspdf": "^3.0.3",
     "jspdf-autotable": "^5.0.2",
+    "jsqr": "^1.4.0",
     "next": "15.5.5",
+    "qrcode": "^1.5.3",
+    "qrcode.react": "^4.2.0",
     "react": "19.1.0",
     "react-dom": "19.1.0",
-    "twilio": "^4.19.0"
+    "react-webcam": "^7.2.0"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3",

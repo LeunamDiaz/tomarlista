@@ -1,6 +1,9 @@
 "use client";
 import { jsPDF } from "jspdf";
 import "jspdf-autotable"; // <-- IMPORTANTE
+import { QRCodeCanvas } from "qrcode.react";
+import QRCode from "qrcode"; // usamos 'qrcode' para generar dataURL del QR
+// Html5Qrcode se importa dinámicamente dentro de startScanner()
 
 import React, { useState, useEffect, useCallback, useMemo } from "react";
 import { motion } from "framer-motion";
@@ -19,6 +22,7 @@ import {
 
 const ADMIN_PASSWORD = "Bienvenido614";
 const ADMIN_SESSION_TIMEOUT = 30 * 60 * 1000; // 30 minutos
+const SCAN_DEBOUNCE_MS = 2000; // evitar lecturas repetidas rápidas
 
 // Helper para obtener fecha local en formato YYYY-MM-DD (evita desfasajes por UTC)
 function getLocalDateYMD(date = new Date()) {
@@ -88,7 +92,7 @@ export default function Home() {
   const [selected, setSelected] = useState(null);
   const [error, setError] = useState(null);
 
-  const [now, setNow] = useState(new Date());
+  const [now, setNow] = useState(null);
   const [testRefreshEnabled, setTestRefreshEnabled] = useState(false);
 
   // Auto-logout admin después del timeout
@@ -108,8 +112,49 @@ export default function Home() {
   }, [adminAuthenticated]);
 
   useEffect(() => {
+    // Inicializar la fecha solo en el cliente
+    setNow(new Date());
     const t = setInterval(() => setNow(new Date()), 60000);
     return () => clearInterval(t);
+  }, []);
+
+  // Asegurar soporte de getUserMedia (shim para navegadores antiguos) y pedir permisos al cargar
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    // Shim de getUserMedia para Safari/antiguos
+    if (!navigator.mediaDevices) {
+      navigator.mediaDevices = {};
+    }
+    if (!navigator.mediaDevices.getUserMedia) {
+      const legacyGetUserMedia =
+        navigator.getUserMedia ||
+        navigator.webkitGetUserMedia ||
+        navigator.mozGetUserMedia ||
+        navigator.msGetUserMedia;
+      if (legacyGetUserMedia) {
+        navigator.mediaDevices.getUserMedia = (constraints) =>
+          new Promise((resolve, reject) => legacyGetUserMedia.call(navigator, constraints, resolve, reject));
+      }
+    }
+
+    // Solicitar permiso una vez al cargar para que el navegador muestre el prompt de permisos
+    const requestPermission = async () => {
+      try {
+        if (!navigator.mediaDevices?.getUserMedia) return;
+        const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+        // Detener inmediatamente; solo queríamos el permiso
+        stream.getTracks().forEach((t) => t.stop());
+      } catch (e) {
+        // Silencioso: el usuario puede denegar; mostraremos UI luego
+      }
+    };
+
+    // En contextos no seguros, getUserMedia no funciona; localhost es seguro
+    const isSecure = window.isSecureContext || location.hostname === "localhost";
+    if (isSecure) {
+      requestPermission();
+    }
   }, []);
   const refreshAttendance = async () => {
     const ok = confirm(
@@ -478,8 +523,280 @@ Sistema de Asistencia Escolar
     }
   }, [adminAuthenticated]);
 
+  // QR / scanner states
+  const [scannerOpen, setScannerOpen] = useState(false);
+  const videoRef = React.useRef(null);
+  const canvasRef = React.useRef(null);
+  const lastScanAtRef = React.useRef(0);
+  const lastTextRef = React.useRef("");
+  const detectorRef = React.useRef(null);
+  const [scanning, setScanning] = useState(false);
+  const [scannerFailed, setScannerFailed] = useState(false);
+  const [videoReady, setVideoReady] = useState(false);
+  const [qrGenerating, setQrGenerating] = useState(false);
+
+  // Generar dataURL de QR para una matrícula
+  const getQrDataUrl = useCallback(async (matricula) => {
+    try {
+      return await QRCode.toDataURL(String(matricula), { margin: 1, width: 320 });
+    } catch (err) {
+      console.error("Error generando QR:", err);
+      return null;
+    }
+  }, []);
+
+  // Descargar el QR como PNG
+  const downloadQr = useCallback(async (matricula, nombre = "") => {
+    try {
+      setQrGenerating(true);
+      const dataUrl = await getQrDataUrl(matricula);
+      if (!dataUrl) {
+        alert("No se pudo generar el QR.");
+        return;
+      }
+      const a = document.createElement("a");
+      a.href = dataUrl;
+      const safeName = (nombre || matricula).replace(/\s+/g, "_");
+      a.download = `QR_${safeName}_${matricula}.png`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    } finally {
+      setQrGenerating(false);
+    }
+  }, [getQrDataUrl]);
+
+  // Sonido de beep cuando se escanea exitosamente
+  const playScanSound = useCallback(() => {
+    try {
+      const audio = new Audio('/assets/sonido.mp3');
+      audio.play().catch(e => {
+        console.warn("No se pudo reproducir el sonido:", e);
+        // Fallback al beep sintético si el archivo no se puede reproducir
+        const ctx = new (window.AudioContext || window.webkitAudioContext)();
+        const o = ctx.createOscillator();
+        const g = ctx.createGain();
+        o.connect(g);
+        g.connect(ctx.destination);
+        o.type = "sine";
+        o.frequency.value = 800;
+        g.gain.value = 0;
+        const now = ctx.currentTime;
+        g.gain.linearRampToValueAtTime(0.3, now + 0.01);
+        g.gain.linearRampToValueAtTime(0, now + 0.2);
+        o.start(now);
+        o.stop(now + 0.2);
+      });
+    } catch (e) {
+      console.warn("Audio no disponible:", e);
+    }
+  }, []);
+
+  // Función de éxito del escaneo
+  const onScanSuccess = useCallback(async (decodedText) => {
+    const now = Date.now();
+    if (now - lastScanAtRef.current < SCAN_DEBOUNCE_MS) return;
+    lastScanAtRef.current = now;
+
+    // Reproducir sonido de beep
+    playScanSound();
+    
+    // Registrar asistencia
+    const matriculaLeida = decodedText.trim();
+    await registerAttendance(matriculaLeida);
+    
+    // NO cerrar la cámara, mantenerla abierta para más escaneos
+  }, [registerAttendance, playScanSound]);
+
+  // Iniciar scanner de cámara - Nueva implementación con canvas y jsQR
+  const startScanner = useCallback(async () => {
+    if (scanning || scannerFailed) return;
+    setScanning(true);
+    setScannerFailed(false);
+
+    try {
+      if (typeof window === "undefined") return;
+
+      // Verificar soporte básico de getUserMedia (tras aplicar shim en efecto de montaje)
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        alert("Para usar la cámara, abra el sitio en HTTPS (o localhost) y permita acceso.");
+        setScannerFailed(true);
+        setScannerOpen(false);
+        return;
+      }
+
+      // Preparar BarcodeDetector si está disponible; fallback a jsQR
+      let jsQR = null;
+      const BarcodeDetectorClass = window.BarcodeDetector;
+      if (BarcodeDetectorClass && BarcodeDetectorClass.getSupportedFormats) {
+        try {
+          const formats = await BarcodeDetectorClass.getSupportedFormats();
+          if (formats?.includes('qr_code')) {
+            detectorRef.current = new BarcodeDetectorClass({ formats: ['qr_code'] });
+          }
+        } catch {}
+      }
+      if (!detectorRef.current) {
+        jsQR = (await import('jsqr')).default;
+      }
+
+      // Obtener elementos del DOM
+      const video = videoRef.current;
+      const canvas = canvasRef.current;
+      const ctx = canvas.getContext('2d', { willReadFrequently: true });
+
+      if (!video || !canvas) {
+        throw new Error("Elementos de video o canvas no encontrados.");
+      }
+
+      // Detener cualquier stream previo antes de crear uno nuevo
+      if (video.srcObject) {
+        try {
+          const oldTracks = video.srcObject.getTracks?.() || [];
+          oldTracks.forEach((t) => t.stop());
+          video.srcObject = null;
+        } catch {}
+      }
+
+      // Solicitar acceso a la cámara
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          facingMode: "environment",
+          width: { ideal: 1280 },
+          height: { ideal: 720 }
+        }
+      });
+
+      video.srcObject = stream;
+      video.setAttribute('playsinline', true); // Requerido para iOS
+      // Esperar a que carguen metadatos para tener dimensiones
+      await new Promise((resolve) => {
+        if (video.readyState >= video.HAVE_METADATA) return resolve();
+        const onLoaded = () => { video.removeEventListener('loadedmetadata', onLoaded); resolve(); };
+        video.addEventListener('loadedmetadata', onLoaded, { once: true });
+      });
+      // Intentar reproducir y tolerar políticas de autoplay
+      try { await video.play(); } catch (e) { /* el usuario puede necesitar interacción */ }
+      setVideoReady(true);
+
+      // Función para procesar cada frame
+      const tick = async () => {
+        if (video.readyState === video.HAVE_ENOUGH_DATA) {
+          // Downscale para rendimiento
+          const vw = video.videoWidth || 640;
+          const vh = video.videoHeight || 480;
+          const targetW = Math.min(800, vw);
+          const scale = targetW / vw;
+          const targetH = Math.round(vh * scale);
+          canvas.width = targetW;
+          canvas.height = targetH;
+          ctx.drawImage(video, 0, 0, targetW, targetH);
+          
+          let text = "";
+          if (detectorRef.current) {
+            try {
+              const bitmap = await createImageBitmap(canvas);
+              const codes = await detectorRef.current.detect(bitmap);
+              if (codes && codes.length > 0) {
+                text = codes[0].rawValue || codes[0].rawValue;
+              }
+            } catch {}
+          } else if (jsQR) {
+            const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+            const code = jsQR(imageData.data, imageData.width, imageData.height, {
+              inversionAttempts: "attemptBoth",
+            });
+            if (code) text = code.data;
+          }
+
+          if (text) {
+            if (text !== lastTextRef.current || Date.now() - lastScanAtRef.current >= SCAN_DEBOUNCE_MS) {
+              lastTextRef.current = text;
+              await onScanSuccess(text);
+            }
+          }
+          
+          if (scanning) {
+            requestAnimationFrame(tick);
+          }
+        } else {
+          if (scanning) {
+            requestAnimationFrame(tick);
+          }
+        }
+      };
+
+      // Iniciar el loop de detección
+      requestAnimationFrame(tick);
+
+      console.log("Scanner iniciado exitosamente ✅");
+
+    } catch (err) {
+      console.error("Error al iniciar scanner:", err);
+
+      let errorMessage = "No se pudo acceder a la cámara.";
+      
+      if (err.message?.includes("not supported")) {
+        errorMessage = "Su navegador no soporta el acceso a la cámara. Intente con Chrome, Firefox o Safari.";
+      } else if (err.name === "NotAllowedError") {
+        errorMessage = "Permisos de cámara denegados. Haga clic en 'Permitir' cuando aparezca el mensaje.";
+      } else if (err.name === "NotFoundError") {
+        errorMessage = "No se encontró ninguna cámara en este dispositivo.";
+      } else if (err.name === "NotReadableError") {
+        errorMessage = "La cámara está siendo usada por otra aplicación.";
+      } else if (err.name === "NotSupportedError") {
+        errorMessage = "Su navegador no soporta el acceso a la cámara.";
+      }
+      
+      alert(errorMessage);
+      setScannerOpen(false);
+      setScannerFailed(true);
+      setScanning(false);
+      setVideoReady(false);
+    } finally {
+      // Mantener scanning=true mientras el escáner esté activo; se pondrá en false en stopScanner
+    }
+  }, [scanning, scannerFailed, onScanSuccess]);
+
+  // Parar scanner
+  const stopScanner = useCallback(async () => {
+    try {
+      const video = videoRef.current;
+      if (video && video.srcObject) {
+        const tracks = video.srcObject.getTracks();
+        tracks.forEach(track => track.stop());
+        video.srcObject = null;
+      }
+    } catch (err) {
+      console.warn("Error parando scanner:", err);
+    } finally {
+      setScannerOpen(false);
+      setScanning(false);
+      setScannerFailed(false);
+      setVideoReady(false);
+    }
+  }, []);
+
+  // Iniciar scanner automáticamente cuando se abre el modal
+  useEffect(() => {
+    if (scannerOpen && !scanning && !scannerFailed) { // No iniciar si falló
+      startScanner();
+    }
+  }, [scannerOpen, scanning, scannerFailed, startScanner]);
+
+  // Cerrar scanner al desmontar
+  useEffect(() => {
+    return () => {
+      const video = videoRef.current;
+      if (video && video.srcObject) {
+        const tracks = video.srcObject.getTracks();
+        tracks.forEach(track => track.stop());
+      }
+    };
+  }, []);
+
   // 🔹 Memoizar cálculos para mejor rendimiento
-  const todayStr = useMemo(() => getLocalDateYMD(now), [now]);
+  const todayStr = useMemo(() => getLocalDateYMD(now || new Date()), [now]);
   
   const filteredStudents = useMemo(() => {
     if (!search.trim()) return students;
@@ -494,47 +811,49 @@ Sistema de Asistencia Escolar
 
   return (
     <div className="min-h-screen bg-white text-gray-900">
-      <header className="max-w-5xl mx-auto px-6 py-8 flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold">Asistencia</h1>
-          <p className="text-sm text-gray-600">Gestión simple y segura</p>
-          {adminAuthenticated && (
-            <p className="text-xs text-green-600 mt-1">
-              🔒 Sesión activa • Panel administrativo
-            </p>
-          )}
-        </div>
-        <nav className="flex gap-3">
-          <button
-            onClick={handlePanelClick}
-            className={`px-3 py-2 border rounded-md hover:bg-gray-100 ${
-              adminAuthenticated ? 'border-green-500 text-green-700' : 'border-gray-900'
-            }`}
-          >
-            {adminAuthenticated ? '📊 Panel' : 'Panel'}
-          </button>
-          <button
-            onClick={() => {
-              if (!adminAuthenticated) return setShowAdminLogin(true);
-              setShowAdd(true);
-            }}
-            className="px-3 py-2 border border-gray-300 rounded-md hover:bg-gray-100"
-            disabled={saving}
-          >
-            + Alumno
-          </button>
-          {adminAuthenticated && (
+      <header className="max-w-5xl mx-auto px-4 sm:px-6 py-6 sm:py-8">
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+          <div>
+            <h1 className="text-2xl sm:text-3xl font-semibold">📚 Asistencia</h1>
+            <p className="text-sm text-gray-600">Gestión simple y segura</p>
+            {adminAuthenticated && (
+              <p className="text-xs text-green-600 mt-1">
+                🔒 Sesión activa • Panel administrativo
+              </p>
+            )}
+          </div>
+          <nav className="flex flex-wrap gap-2 sm:gap-3 w-full sm:w-auto">
             <button
-              onClick={handleAdminLogout}
-              className="px-3 py-2 border border-red-300 text-red-600 rounded-md hover:bg-red-50"
+              onClick={handlePanelClick}
+              className={`flex-1 sm:flex-none px-3 py-2 border rounded-lg hover:bg-gray-100 text-sm font-medium ${
+                adminAuthenticated ? 'border-green-500 text-green-700 bg-green-50' : 'border-gray-900'
+              }`}
             >
-              Salir
+              {adminAuthenticated ? '📊 Panel' : '🔐 Panel'}
             </button>
-          )}
-        </nav>
+            <button
+              onClick={() => {
+                if (!adminAuthenticated) return setShowAdminLogin(true);
+                setShowAdd(true);
+              }}
+              className="flex-1 sm:flex-none px-3 py-2 border border-gray-300 rounded-lg hover:bg-gray-100 text-sm font-medium"
+              disabled={saving}
+            >
+              ➕ Alumno
+            </button>
+            {adminAuthenticated && (
+              <button
+                onClick={handleAdminLogout}
+                className="flex-1 sm:flex-none px-3 py-2 border border-red-300 text-red-600 rounded-lg hover:bg-red-50 text-sm font-medium"
+              >
+                🚪 Salir
+              </button>
+            )}
+          </nav>
+        </div>
       </header>
 
-      <main className="max-w-3xl mx-auto px-6 pb-16">
+      <main className="max-w-3xl sm:max-w-4xl lg:max-w-5xl mx-auto px-4 sm:px-6 pb-16">
         {loading ? (
           <div className="text-center py-8">
             <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900"></div>
@@ -559,37 +878,54 @@ Sistema de Asistencia Escolar
             )}
 
             {/* Registrar asistencia */}
-            <section className="bg-white border p-6 rounded-2xl shadow-sm">
-              <h2 className="text-lg font-medium mb-3">Registrar asistencia</h2>
-              <form
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  registerAttendance(matriculaInput.trim());
-                }}
-                className="flex gap-3 items-center"
-              >
+            <section className="bg-white border p-4 sm:p-6 rounded-2xl shadow-sm">
+              <h2 className="text-lg font-medium mb-4">Registrar asistencia</h2>
+              
+              {/* Input de matrícula */}
+              <div className="mb-4">
                 <input
                   value={matriculaInput}
                   onChange={(e) => setMatriculaInput(e.target.value)}
                   placeholder="Ingrese su matrícula"
-                  className="flex-1 border rounded-md px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  className="w-full border rounded-lg px-4 py-3 text-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                   disabled={saving}
                   autoComplete="off"
                 />
+              </div>
+
+              {/* Botones en layout responsive */}
+              <div className="flex flex-col sm:flex-row gap-3 mb-4">
                 <button
-                  type="submit"
-                  className="px-4 py-2 border rounded-md font-semibold bg-blue-500 text-white hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed"
+                  type="button"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    registerAttendance(matriculaInput.trim());
+                  }}
+                  className="flex-1 px-6 py-3 bg-blue-500 text-white rounded-lg font-semibold hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed text-lg"
                   disabled={saving || !matriculaInput.trim()}
                 >
-                  {saving ? "Registrando..." : "Registrar"}
+                  {saving ? "Registrando..." : "✅ Registrar"}
                 </button>
-              </form>
-              <div className="mt-3 flex justify-between items-center text-sm text-gray-500">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setScannerFailed(false); // Resetear estado de fallo
+                    setScannerOpen(true);
+                  }}
+                  className="flex-1 sm:flex-none px-6 py-3 border-2 border-green-500 text-green-600 rounded-lg hover:bg-green-50 font-semibold text-lg"
+                  disabled={saving}
+                >
+                  📷 Escanear QR
+                </button>
+              </div>
+
+              {/* Información adicional */}
+              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center text-sm text-gray-500 gap-2">
                 <span>
-                  Hora actual: {now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                  🕐 {now ? now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "--:--"}
                 </span>
                 <span>
-                  Total alumnos: {students.length}
+                  👥 {students.length} alumnos registrados
                 </span>
               </div>
             </section>
@@ -635,7 +971,7 @@ Sistema de Asistencia Escolar
                 <div className="grid gap-3">
                   {filteredStudents.length === 0 && search ? (
                     <div className="text-center py-8 text-gray-500">
-                      <p>No se encontraron alumnos con "{search}"</p>
+                      <p>No se encontraron alumnos con &quot;{search}&quot;</p>
                       <button
                         onClick={() => setSearch("")}
                         className="text-blue-500 hover:text-blue-700 mt-2"
@@ -712,53 +1048,60 @@ Sistema de Asistencia Escolar
                             <motion.div 
                               initial={{ opacity: 0, y: 10 }}
                               animate={{ opacity: 1, y: 0 }}
-                              className="mt-3 border rounded-2xl p-4 bg-white"
+                              className="mt-3 border rounded-2xl p-4 md:p-6 bg-white shadow-sm"
                             >
-                              <div className="flex justify-between items-start mb-4">
+                              <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4 mb-4">
                                 <div className="flex-1">
-                                  <div className="font-semibold text-xl text-gray-900">{s.nombre}</div>
-                                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-3">
+                                  <div className="font-semibold text-xl md:text-2xl text-gray-900 break-words">{s.nombre}</div>
+                                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3 md:gap-4 mt-3">
                                     <div className="bg-gray-50 p-3 rounded-lg">
-                                      <div className="text-sm text-gray-500">Matrícula</div>
-                                      <div className="font-medium">{s.matricula}</div>
+                                      <div className="text-xs md:text-sm text-gray-500">Matrícula</div>
+                                      <div className="font-medium break-all">{s.matricula}</div>
                                     </div>
                                     <div className="bg-gray-50 p-3 rounded-lg">
-                                      <div className="text-sm text-gray-500">Teléfono</div>
-                                      <div className="font-medium">{s.telefono || "No registrado"}</div>
+                                      <div className="text-xs md:text-sm text-gray-500">Teléfono</div>
+                                      <div className="font-medium break-words">{s.telefono || "No registrado"}</div>
                                     </div>
                                     <div className="bg-gray-50 p-3 rounded-lg">
-                                      <div className="text-sm text-gray-500">Padre/Madre/Tutor</div>
-                                      <div className="font-medium">{s.nombrePadre || "No registrado"}</div>
+                                      <div className="text-xs md:text-sm text-gray-500">Padre/Madre/Tutor</div>
+                                      <div className="font-medium break-words">{s.nombrePadre || "No registrado"}</div>
                                     </div>
                                     <div className="bg-gray-50 p-3 rounded-lg">
-                                      <div className="text-sm text-gray-500">Teléfono del tutor</div>
-                                      <div className="font-medium">{s.telefonoPadre || "No registrado"}</div>
+                                      <div className="text-xs md:text-sm text-gray-500">Teléfono del tutor</div>
+                                      <div className="font-medium break-words">{s.telefonoPadre || "No registrado"}</div>
                                     </div>
                                     <div className="bg-gray-50 p-3 rounded-lg md:col-span-2">
-                                      <div className="text-sm text-gray-500">Total asistencias</div>
+                                      <div className="text-xs md:text-sm text-gray-500">Total asistencias</div>
                                       <div className="font-medium text-lg">{s.asistencias?.length || 0}</div>
                                     </div>
                                   </div>
                                 </div>
-                                <div className="flex gap-2 ml-4">
+                                <div className="flex flex-wrap gap-2 md:gap-3 ml-0 md:ml-4">
                                   <button
                                     onClick={() => setSelected(null)}
-                                    className="px-3 py-2 border border-gray-300 rounded-md text-sm text-gray-600 hover:bg-gray-50"
+                                    className="w-full sm:w-auto px-3 py-2 border border-gray-300 rounded-md text-sm text-gray-600 hover:bg-gray-50 whitespace-normal"
                                   >
                                     Cerrar
                                   </button>
                                   {s.telefonoPadre && (
                                     <button
                                       onClick={() => notifyAbsence(s)}
-                                      className="px-4 py-2 bg-green-500 text-white rounded-md text-sm hover:bg-green-600 font-medium"
+                                      className="w-full sm:w-auto px-4 py-2 bg-green-500 text-white rounded-md text-sm hover:bg-green-600 font-medium whitespace-normal"
                                       disabled={saving}
                                     >
                                       {saving ? "Enviando..." : "📱 Notificar Ausencia"}
                                     </button>
                                   )}
                                   <button
+                                    onClick={() => downloadQr(s.matricula, s.nombre)}
+                                    className="w-full sm:w-auto px-4 py-2 border border-gray-300 rounded-md text-sm text-gray-700 hover:bg-gray-50 whitespace-normal"
+                                    disabled={qrGenerating}
+                                  >
+                                    {qrGenerating ? "Generando..." : "⬇️ Descargar QR"}
+                                  </button>
+                                  <button
                                     onClick={() => deleteStudent(s.matricula)}
-                                    className="px-4 py-2 border border-red-500 rounded-md text-sm text-red-600 hover:bg-red-50 font-medium"
+                                    className="w-full sm:w-auto px-4 py-2 border border-red-500 rounded-md text-sm text-red-600 hover:bg-red-50 font-medium whitespace-normal"
                                     disabled={saving}
                                   >
                                     {saving ? "Eliminando..." : "🗑️ Eliminar"}
@@ -769,7 +1112,7 @@ Sistema de Asistencia Escolar
                               {/* Historial de asistencias */}
                               <div>
                                 <h4 className="font-medium mb-3 text-lg">Historial de asistencias</h4>
-                                <div className="max-h-60 overflow-y-auto border rounded-lg bg-white">
+                                <div className="max-h-64 md:max-h-80 overflow-y-auto border rounded-lg bg-white">
                                   {s.asistencias?.length === 0 ? (
                                     <div className="text-center py-8 text-gray-500">
                                       <p>Sin registros de asistencia</p>
@@ -778,12 +1121,12 @@ Sistema de Asistencia Escolar
                                   ) : (
                                     <div className="divide-y">
                                       {[...(s.asistencias || [])].reverse().map((a, i) => (
-                                        <div key={i} className="flex justify-between items-center p-3 hover:bg-gray-50">
+                                        <div key={i} className="flex justify-between items-center p-3 hover:bg-gray-50 text-sm md:text-base">
                                           <div className="flex items-center">
                                             <span className="w-2 h-2 bg-green-500 rounded-full mr-3"></span>
                                             <span className="font-medium">{a.fecha}</span>
                                           </div>
-                                          <span className="text-sm text-gray-500 bg-gray-100 px-2 py-1 rounded">
+                                          <span className="text-xs md:text-sm text-gray-500 bg-gray-100 px-2 py-1 rounded">
                                             {a.hora}
                                           </span>
                                         </div>
@@ -895,6 +1238,86 @@ Sistema de Asistencia Escolar
             </form>
           </motion.div>
         </motion.div>
+      )}
+
+      {/* Scanner QR modal */}
+      {scannerOpen && (
+        <div className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center p-2 sm:p-4">
+          <div className="bg-white rounded-xl w-full max-w-lg mx-auto shadow-2xl max-h-[90vh] overflow-hidden">
+            <div className="flex justify-between items-center p-4 border-b bg-green-50">
+              <h4 className="font-semibold text-lg text-green-800">📷 Escáner QR</h4>
+              <button
+                onClick={() => { stopScanner(); }}
+                className="px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 font-medium text-sm"
+              >
+                ✕ Cerrar
+              </button>
+            </div>
+            <div className="p-4">
+              <div className="relative">
+                <video 
+                  ref={videoRef}
+                  className="w-full h-64 sm:h-80 bg-gray-100 rounded-lg overflow-hidden border-2 border-green-300"
+                  style={{ display: scanning ? 'block' : 'none' }}
+                  autoPlay
+                  playsInline
+                  muted
+                />
+                <canvas 
+                  ref={canvasRef}
+                  className="hidden"
+                />
+                {/* Overlay eliminado para no tapar la vista */}
+              </div>
+              <div className="mt-4 text-center space-y-2">
+                {scannerFailed ? (
+                  <div className="p-4 bg-red-50 rounded-lg border border-red-200">
+                    <p className="text-sm text-red-700 font-medium mb-2">
+                      ❌ No se pudo iniciar la cámara
+                    </p>
+                    <p className="text-xs text-red-600 mb-3">
+                      Verifique que su navegador tenga permisos de cámara y que no esté siendo usada por otra aplicación.
+                    </p>
+                    <button
+                      onClick={() => {
+                        setScannerFailed(false);
+                        startScanner();
+                      }}
+                      className="px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 font-medium text-sm"
+                    >
+                      🔄 Reintentar
+                    </button>
+                  </div>
+                ) : (
+                  <>
+                    <p className="text-sm text-gray-700 font-medium">
+                      📱 Apunte el código QR del alumno al centro
+                    </p>
+                    <p className="text-xs text-gray-500">
+                      🔊 Se escuchará un beep al registrar la asistencia
+                    </p>
+                    <p className="text-xs text-green-600 font-medium">
+                      ✅ La cámara permanece abierta para más alumnos
+                    </p>
+                    <div className="mt-3 p-3 bg-blue-50 rounded-lg">
+                      <p className="text-xs text-blue-700 font-medium mb-1">
+                        🔐 <strong>Permisos de Cámara:</strong>
+                      </p>
+                      <p className="text-xs text-blue-600">
+                        Si aparece un mensaje de permisos, haga clic en <strong>&quot;Permitir&quot;</strong> para usar la cámara
+                      </p>
+                    </div>
+                    <div className="mt-2 p-2 bg-yellow-50 rounded-lg">
+                      <p className="text-xs text-yellow-700">
+                        💡 <strong>Tip:</strong> Asegúrese de que el código QR esté bien iluminado y enfocado
+                      </p>
+                    </div>
+                  </>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
       )}
     </div> 
   );
@@ -1016,12 +1439,12 @@ function AddStudentForm({ onCancel, onSave, isSubmitting }) {
         </button>
         <button 
           type="submit" 
-          className="px-6 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600 font-medium disabled:opacity-50 disabled:cursor-not-allowed"
-          disabled={isSubmitting || !matricula.trim() || !nombre.trim()}
+          className="px-6 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600 font-medium disabled:opacity-50"
+          disabled={isSubmitting}
         >
-          {isSubmitting ? "Guardando..." : "Guardar"}
+          {isSubmitting ? "Guardando..." : "Guardar alumno"}
         </button>
       </div>
     </form>
   );
-} 
+}
