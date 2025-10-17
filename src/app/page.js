@@ -550,21 +550,25 @@ Sistema de Asistencia Escolar
     // Reproducir sonido de beep
     playScanSound();
     
-    // Mostrar resultado en el elemento result
+    // Mostrar resultado temporal en el elemento result
     const resultElement = document.getElementById('result');
     if (resultElement) {
       resultElement.innerHTML = `
-        <h2 style="color: #4CAF50; margin-bottom: 10px;">Success!</h2>
-        <p><a href="${result}" target="_blank" style="color: #2196F3; text-decoration: none; word-break: break-all;">${result}</a></p>
+        <div style="color: #4CAF50; margin-bottom: 10px; font-weight: bold;">✅ ¡Escaneo exitoso!</div>
+        <p style="color: #2196F3; word-break: break-all;">${result}</p>
       `;
+      
+      // Limpiar el resultado después de 3 segundos
+      setTimeout(() => {
+        resultElement.innerHTML = '';
+      }, 3000);
     }
     
     // Registrar asistencia
     const matriculaLeida = result.trim();
     await registerAttendance(matriculaLeida);
     
-    // Cerrar el scanner después del escaneo exitoso
-    setScannerOpen(false);
+    // NO cerrar el scanner - mantenerlo abierto para más escaneos
   }, [registerAttendance, playScanSound]);
 
   // Función de error del escaneo
@@ -580,12 +584,21 @@ Sistema de Asistencia Escolar
         try {
           const { Html5QrcodeScanner } = await import("html5-qrcode");
           
+          // Detectar si es móvil para usar solo cámara trasera
+          const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+          
           const scanner = new Html5QrcodeScanner('reader', { 
             qrbox: {
               width: 250,
               height: 250,
             },
             fps: 20,
+            // Configuración para móviles - usar solo cámara trasera
+            ...(isMobile && {
+              supportedScanTypes: [Html5QrcodeScanner.SCAN_TYPE_CAMERA],
+              showTorchButtonIfSupported: true,
+              showZoomSliderIfSupported: true,
+            })
           });
 
           scanner.render(onScanSuccess, onScanFailure);
@@ -752,35 +765,39 @@ Sistema de Asistencia Escolar
                 animate={{ opacity: 1, y: 0 }}
                 className="mt-8 bg-white border p-6 rounded-2xl shadow-sm"
               >
-                <div className="flex justify-between items-center mb-4">
-                  <div>
-                    <h3 className="font-medium text-lg">Panel de administración</h3>
-                    <p className="text-sm text-gray-500">
-                      {filteredStudents.length} de {students.length} alumnos
-                    </p>
+                <div className="mb-4">
+                  <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4 mb-4">
+                    <div>
+                      <h3 className="font-medium text-lg">Panel de administración</h3>
+                      <p className="text-sm text-gray-500">
+                        {filteredStudents.length} de {students.length} alumnos
+                      </p>
+                    </div>
+                    <div className="flex flex-col sm:flex-row gap-2">
+                      <button 
+                        onClick={refreshAttendance} 
+                        className="bg-blue-500 hover:bg-blue-600 text-white px-3 py-2 rounded-md shadow-md transition duration-200 text-sm"
+                      >
+                        🔄 Refrescar Asistencias
+                      </button>
+                      <button
+                        onClick={exportAttendancePDF}
+                        className="px-3 py-2 border rounded-md bg-green-500 text-white hover:bg-green-600 text-sm"
+                        disabled={saving}
+                      >
+                        📄 Exportar PDF
+                      </button>
+                    </div>
                   </div>
-                  <div>
-                  <button onClick={refreshAttendance} className="bg-blue-500 hover:bg-blue-600 text-white px-3 py-1 rounded-md shadow-md transition duration-200 ml-2">Refrescar Asistencias</button> 
+                  
+                  <div className="w-full">
+                    <input
+                      placeholder="Buscar por nombre, matrícula o teléfono..."
+                      value={search}
+                      onChange={(e) => setSearch(e.target.value)}
+                      className="w-full border rounded-md px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    />
                   </div>
-                  <div>
-
-                  <button
-  onClick={exportAttendancePDF}
-  className="px-3 py-2 border rounded-md bg-green-500 text-white hover:bg-green-600 ml-2"
-  disabled={saving}
->
-  📄 Exportar Asistencias (PDF)
-</button>
-
-</div>
-
-
-                  <input
-                    placeholder="Buscar por nombre, matrícula o teléfono..."
-                    value={search}
-                    onChange={(e) => setSearch(e.target.value)}
-                    className="border rounded-md px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                  />
                 </div>
 
                 <div className="grid gap-3">
@@ -1056,13 +1073,16 @@ Sistema de Asistencia Escolar
           </button>
           
           <div className="w-full h-full flex flex-col items-center justify-center p-4">
-            <div className="text-center mb-6">
-              <h1 className="text-2xl font-bold mb-2">QR Code Scanner</h1>
-              <p className="text-gray-600">Point your camera at a QR code to scan it</p>
+            <div className="text-center mb-4 sm:mb-6">
+              <h1 className="text-xl sm:text-2xl font-bold mb-2">📷 Escáner QR</h1>
+              <p className="text-sm sm:text-base text-gray-600">Apunta la cámara al código QR del estudiante</p>
             </div>
             
-            <div id="reader" className="w-full max-w-2xl"></div>
-            <div id="result" className="text-center text-lg mt-6 p-4 bg-gray-100 rounded-lg max-w-2xl"></div>
+            <div className="w-full max-w-2xl flex-1 flex flex-col items-center justify-center">
+              <div id="reader" className="w-full h-full max-h-[60vh] sm:max-h-[70vh]"></div>
+            </div>
+            
+            <div id="result" className="w-full max-w-2xl mt-4 text-center text-sm sm:text-base p-3 bg-gray-100 rounded-lg"></div>
           </div>
         </div>
       )}
