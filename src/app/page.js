@@ -35,79 +35,7 @@
 
 
   export default function Home() {
- 
-
-  const SCAN_DEBOUNCE_MS = 4000; 
-
-
-
-  // Función de éxito del escaneo
-  // Debe incluir 'isScanningActive' y 'setIsScanningActive' en sus dependencias
-    const onScanSuccess = useCallback(async (result) => {
-      
-      // 🛑 1. BLOQUEO: Si el escaneo está inactivo (estamos procesando), ignora esta lectu
-      // 🛑 2. DESACTIVA EL ESCANEO inmediatamente para evitar el rebote
-      setIsScanningActive(false);
-
-      // Reproducir sonido de beep
-      playScanSound();
-      
-      // Código de prueba para mostrar el QR detectado (opcional)
-      const resultElement = document.getElementById('result');
-      if (resultElement) {
-        resultElement.innerHTML = `
-          <h2 style="color: #4CAF50; margin-bottom: 10px;">QR Escaneado!</h2>
-          <p style="font-weight: bold; word-break: break-all;">${result}</p>
-        `;
-      }
-      
-      // 3. PROCESA el registro de asistencia
-      const matriculaLeida = result.trim();
-      await registerAttendance(matriculaLeida);
-      
-      // 4. VUELVE A ACTIVAR EL ESCANEO después de un tiempo (para permitir otro escaneo)
-      // Esto es crucial si la cámara permanece abierta.
-      setTimeout(() => {
-        setIsScanningActive(true);
-      }, SCAN_DEBOUNCE_MS);
-
-
-
-      });
-    
-
-      
-      doc.setFontSize(16);
-      doc.text("Reporte de Asistencias", 14, 20);
-      doc.setFontSize(12);
-      doc.text(`Fecha: ${todayStrFull}`, 14, 28);
-    
-      // Encabezados de tabla
-      const tableColumn = ["Matrícula", "Alumno", "Estado", "Hora"];
-      const tableRows = [];
-    
-      const todayYMD = getLocalDateYMD();
-    
-      students.forEach(s => {
-        const asistenciaHoy = s.asistencias?.find(a => a.fecha === todayYMD);
-        const estado = asistenciaHoy ? "Presente" : "Ausente";
-        const hora = asistenciaHoy ? asistenciaHoy.hora : "-";
-    
-        tableRows.push([s.matricula, s.nombre, estado, hora]);
-      });
-    
-      // Ajuste de columnas y tabla
-      let startY = 36;
-      doc.autoTable({
-        head: [tableColumn],
-        body: tableRows,
-        startY,
-        styles: { fontSize: 10 },
-        headStyles: { fillColor: [41, 128, 185] },
-      });
-    
-      doc.save(`Asistencias_${todayYMD}.pdf`);
-    };
+    const SCAN_DEBOUNCE_MS = 4000;
     
     const [adminAuthenticated, setAdminAuthenticated] = useState(false);
     const [adminPasswordInput, setAdminPasswordInput] = useState("");
@@ -115,6 +43,7 @@
     const [adminOpen, setAdminOpen] = useState(false);
     const [showAdd, setShowAdd] = useState(false);
     const [adminSessionTimeout, setAdminSessionTimeout] = useState(null);
+    const [isScanningActive, setIsScanningActive] = useState(true);
 
     const [matriculaInput, setMatriculaInput] = useState("");
     const [students, setStudents] = useState([]);
@@ -201,6 +130,48 @@
       } finally {
         setSaving(false);
       }
+    };
+
+    // Función para exportar asistencias a PDF
+    const exportAttendancePDF = () => {
+      const doc = new jsPDF();
+      const todayStrFull = new Date().toLocaleDateString("es-MX", {
+        weekday: "long",
+        year: "numeric",
+        month: "long",
+        day: "numeric",
+      });
+      
+      doc.setFontSize(16);
+      doc.text("Reporte de Asistencias", 14, 20);
+      doc.setFontSize(12);
+      doc.text(`Fecha: ${todayStrFull}`, 14, 28);
+    
+      // Encabezados de tabla
+      const tableColumn = ["Matrícula", "Alumno", "Estado", "Hora"];
+      const tableRows = [];
+    
+      const todayYMD = getLocalDateYMD();
+    
+      students.forEach(s => {
+        const asistenciaHoy = s.asistencias?.find(a => a.fecha === todayYMD);
+        const estado = asistenciaHoy ? "Presente" : "Ausente";
+        const hora = asistenciaHoy ? asistenciaHoy.hora : "-";
+    
+        tableRows.push([s.matricula, s.nombre, estado, hora]);
+      });
+    
+      // Ajuste de columnas y tabla
+      let startY = 36;
+      doc.autoTable({
+        head: [tableColumn],
+        body: tableRows,
+        startY,
+        styles: { fontSize: 10 },
+        headStyles: { fillColor: [41, 128, 185] },
+      });
+    
+      doc.save(`Asistencias_${todayYMD}.pdf`);
     };
     
 
@@ -595,23 +566,34 @@
 
     // Función de éxito del escaneo
     const onScanSuccess = useCallback(async (result) => {
+      // 🛑 1. BLOQUEO: Si el escaneo está inactivo (estamos procesando), ignora esta lectura
+      if (!isScanningActive) return;
+      
+      // 🛑 2. DESACTIVA EL ESCANEO inmediatamente para evitar el rebote
+      setIsScanningActive(false);
+
       // Reproducir sonido de beep
       playScanSound();
       
-      // Mostrar resultado en el elemento result
+      // Código de prueba para mostrar el QR detectado (opcional)
       const resultElement = document.getElementById('result');
       if (resultElement) {
         resultElement.innerHTML = `
-          <h2 style="color: #4CAF50; margin-bottom: 10px;">Success!</h2>
-          <p><a href="${result}" target="_blank" style="color: #2196F3; text-decoration: none; word-break: break-all;">${result}</a></p>
+          <h2 style="color: #4CAF50; margin-bottom: 10px;">QR Escaneado!</h2>
+          <p style="font-weight: bold; word-break: break-all;">${result}</p>
         `;
       }
       
-      // Registrar asistencia
+      // 3. PROCESA el registro de asistencia
       const matriculaLeida = result.trim();
       await registerAttendance(matriculaLeida);
       
-    }, [registerAttendance, playScanSound]);
+      // 4. VUELVE A ACTIVAR EL ESCANEO después de un tiempo (para permitir otro escaneo)
+      // Esto es crucial si la cámara permanece abierta.
+      setTimeout(() => {
+        setIsScanningActive(true);
+      }, SCAN_DEBOUNCE_MS);
+    }, [isScanningActive, playScanSound, registerAttendance, SCAN_DEBOUNCE_MS]);
 
     // Función de error del escaneo
     const onScanFailure = useCallback((error) => {
@@ -1131,6 +1113,7 @@
         )}
       </div> 
     );
+  }
 
   function AddStudentForm({ onCancel, onSave, isSubmitting }) {
     const [matricula, setMatricula] = useState("");
