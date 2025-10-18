@@ -711,15 +711,32 @@ export default function Home() {
     const todayStr = useMemo(() => getLocalDateYMD(now || new Date()), [now]);
     
     const filteredStudents = useMemo(() => {
-      if (!search.trim()) return students;
+      let filtered = students;
       
-      const searchLower = search.toLowerCase().trim();
-      return students.filter(s => 
-        s.matricula.toLowerCase().includes(searchLower) ||
-        s.nombre.toLowerCase().includes(searchLower) ||
-        s.telefono?.toLowerCase().includes(searchLower)
-      );
-    }, [students, search]);
+      // Aplicar filtro de búsqueda si existe
+      if (search.trim()) {
+        const searchLower = search.toLowerCase().trim();
+        filtered = students.filter(s => 
+          s.matricula.toLowerCase().includes(searchLower) ||
+          s.nombre.toLowerCase().includes(searchLower) ||
+          s.telefono?.toLowerCase().includes(searchLower)
+        );
+      }
+      
+      // Ordenar: primero ausentes (alfabético), luego presentes (alfabético)
+      const todayStr = getLocalDateYMD(now || new Date());
+      return filtered.sort((a, b) => {
+        const aPresente = a.asistencias?.some(att => att.fecha === todayStr);
+        const bPresente = b.asistencias?.some(att => att.fecha === todayStr);
+        
+        // Si uno está presente y otro no, el ausente va primero
+        if (aPresente && !bPresente) return 1;
+        if (!aPresente && bPresente) return -1;
+        
+        // Si ambos tienen el mismo estado, ordenar alfabéticamente por nombre
+        return a.nombre.localeCompare(b.nombre);
+      });
+    }, [students, search, now]);
 
   // ===== RENDER =====
   return (
