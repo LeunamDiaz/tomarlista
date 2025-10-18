@@ -45,12 +45,7 @@
   // Debe incluir 'isScanningActive' y 'setIsScanningActive' en sus dependencias
     const onScanSuccess = useCallback(async (result) => {
       
-      // 🛑 1. BLOQUEO: Si el escaneo está inactivo (estamos procesando), ignora esta lectura.
-      if (!isScanningActive) {
-        console.log("Escaneo ignorado: debounce activo.");
-        return;
-      }
-
+      // 🛑 1. BLOQUEO: Si el escaneo está inactivo (estamos procesando), ignora esta lectu
       // 🛑 2. DESACTIVA EL ESCANEO inmediatamente para evitar el rebote
       setIsScanningActive(false);
 
@@ -77,9 +72,7 @@
       }, SCAN_DEBOUNCE_MS);
 
 
-    }, [registerAttendance, playScanSound, isScanningActive]); // 👈 ¡Actualiza las dependencias!    
-      const todayStrFull = new Date().toLocaleDateString("es-MX", {
-        weekday: "long", year: "numeric", month: "long", day: "numeric"
+
       });
     
 
