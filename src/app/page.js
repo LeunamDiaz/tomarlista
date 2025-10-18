@@ -36,7 +36,7 @@
 
 export default function Home() {
   // ===== CONSTANTS =====
-  const SCAN_DEBOUNCE_MS = 4000;
+  // Ya no necesitamos SCAN_DEBOUNCE_MS porque usamos pausa fija de 3 segundos
 
   // ===== STATE HOOKS =====
   // Admin authentication state
@@ -64,6 +64,8 @@ export default function Home() {
   const [isScanningActive, setIsScanningActive] = useState(true);
   const [scannerOpen, setScannerOpen] = useState(false);
   const [qrGenerating, setQrGenerating] = useState(false);
+  const [isProcessingScan, setIsProcessingScan] = useState(false);
+  const [scanCooldownTime, setScanCooldownTime] = useState(0);
 
   // ===== UTILITY FUNCTIONS =====
   // Export PDF function
@@ -238,10 +240,16 @@ export default function Home() {
       fetchStudents();
     }, [fetchStudents]);
 
-    // 🔹 Registrar asistencia (optimizado)
+    // 🔹 Registrar asistencia (optimizado con debounce)
     const registerAttendance = useCallback(async (matricula) => {
       if (!matricula?.trim()) {
         setError("Por favor ingrese una matrícula válida.");
+        return;
+      }
+      
+      // 🛑 PREVENIR múltiples llamadas simultáneas
+      if (saving) {
+        console.log("Ya hay un registro en proceso, ignorando llamada duplicada");
         return;
       }
       
@@ -265,19 +273,12 @@ export default function Home() {
         
         if (alreadyMarked && !testRefreshEnabled) {
           toast.error(`¡Hola, ${student.nombre}!, Tu asistencia ya fue registrada hoy.`);
-        
-          // Pausa de 4 segundos
-          await new Promise((resolve) => setTimeout(resolve, 4000));
-        
-          setSaving(false);
-          return;
-        }if (alreadyMarked && !testRefreshEnabled) {
-          toast.error(`¡Hola, ${student.nombre}!, Tu asistencia ya fue registrada hoy.`);
-        
-          // Pausa de 4 segundos
-          await new Promise((resolve) => setTimeout(resolve, 4000));
-        
-          setSaving(false);
+          
+          // Pausa de 3 segundos usando setTimeout (no bloquea la UI)
+          setTimeout(() => {
+            setSaving(false);
+          }, 3000);
+          
           return;
         }
         const hora = new Date().toLocaleTimeString([], {
@@ -308,7 +309,6 @@ export default function Home() {
         
         // Mostrar mensaje de éxito
         toast.success(`¡Bienvenido(a), ${student.nombre}! Asistencia registrada exitosamente.`);
-        await new Promise((resolve) => setTimeout(resolve, 3000));
 
       } catch (error) {
         console.error("Error registrando asistencia:", error);
@@ -558,8 +558,8 @@ export default function Home() {
     // Sonido de beep cuando se escanea exitosamente
     const playScanSound = useCallback(() => {
       try {
-        // Usar el sonido de la carpeta plugins
-        const audio = new Audio('/src/app/plugins/assets_sonido.mp3');
+        // Usar el sonido de la carpeta public/assets
+        const audio = new Audio('/assets/sonido.mp3');
         audio.volume = 0.7;
         audio.play().catch(() => {
           // Fallback: beep sintético si el archivo no se encuentra
@@ -583,45 +583,84 @@ export default function Home() {
     }, []);
 
   // ===== SCANNER FUNCTIONS =====
-  // Función de éxito del escaneo (optimizada)
+  // Función de éxito del escaneo con pausa efectiva MEJORADA
   const onScanSuccess = useCallback(async (result) => {
-    // 🛑 1. BLOQUEO: Si el escaneo está inactivo (estamos procesando), ignora esta lectura
-    if (!isScanningActive) return;
-    
-    // 🛑 2. DESACTIVA EL ESCANEO inmediatamente para evitar el rebote
-    setIsScanningActive(false);
-
-    // Reproducir sonido de beep
-    playScanSound();
-    
-    // Código de prueba para mostrar el QR detectado (opcional)
-    const resultElement = document.getElementById('result');
-    if (resultElement) {
-      resultElement.innerHTML = `
-        <h2 style="color: #4CAF50; margin-bottom: 10px;">QR Escaneado!</h2>
-        <p style="font-weight: bold; word-break: break-all;">${result}</p>
-      `;
+    // 🛑 BLOQUEO INMEDIATO: Si ya estamos procesando un escaneo, ignorar COMPLETAMENTE
+    if (isProcessingScan || !isScanningActive) {
+      console.log("Escaneo ignorado - ya procesando o scanner inactivo");
+      return;
     }
     
-    // 3. PROCESA el registro de asistencia
-    const matriculaLeida = result.trim();
-    await registerAttendance(matriculaLeida);
+    // 🛑 MARCAR COMO PROCESANDO inmediatamente para BLOQUEAR otros escaneos
+    setIsProcessingScan(true);
+    setIsScanningActive(false);
     
-    // 4. VUELVE A ACTIVAR EL ESCANEO después de un tiempo (para permitir otro escaneo)
-    // Esto es crucial si la cámara permanece abierta.
-    setTimeout(() => {
-      setIsScanningActive(true);
-    }, SCAN_DEBOUNCE_MS);
-  }, [isScanningActive, playScanSound, registerAttendance, SCAN_DEBOUNCE_MS]);
+    // 🛑 LIMPIAR el scanner inmediatamente para evitar más lecturas
+    if (window.currentScanner) {
+      try {
+        window.currentScanner.clear();
+        console.log("Scanner limpiado para evitar múltiples lecturas");
+      } catch (error) {
+        console.warn("Error limpiando scanner:", error);
+      }
+    }
+
+    try {
+      // Reproducir sonido de escáner
+      playScanSound();
+      
+      // Mostrar resultado del escaneo
+      const resultElement = document.getElementById('result');
+      if (resultElement) {
+        resultElement.innerHTML = `
+          <h2 style="color: #4CAF50; margin-bottom: 10px;">QR Escaneado!</h2>
+          <p style="font-weight: bold; word-break: break-all;">${result}</p>
+        `;
+      }
+      
+      // Procesar el registro de asistencia
+      const matriculaLeida = result.trim();
+      await registerAttendance(matriculaLeida);
+      
+    } catch (error) {
+      console.error("Error procesando escaneo:", error);
+    } finally {
+      // PAUSA DE 3 SEGUNDOS con countdown visual MEJORADO
+      setScanCooldownTime(3);
+      const countdownInterval = setInterval(() => {
+        setScanCooldownTime(prev => {
+          if (prev <= 1) {
+            clearInterval(countdownInterval);
+            // REACTIVAR el scanner después del delay
+            setIsProcessingScan(false);
+            setIsScanningActive(true);
+            console.log("Scanner reactivado después del delay");
+            return 0;
+          }
+          return prev - 1;
+        });
+      }, 1000);
+    }
+  }, [isProcessingScan, isScanningActive, playScanSound, registerAttendance]);
 
     // Función de error del escaneo
     const onScanFailure = useCallback((error) => {
       console.warn("Error del scanner:", error);
     }, []);
 
-    // Inicializar scanner cuando se abre el modal
+    // Inicializar scanner cuando se abre el modal MEJORADO
     useEffect(() => {
       if (scannerOpen) {
+        // Limpiar cualquier scanner previo antes de crear uno nuevo
+        if (window.currentScanner) {
+          try {
+            window.currentScanner.clear();
+            window.currentScanner = null;
+          } catch (error) {
+            console.warn("Error limpiando scanner previo:", error);
+          }
+        }
+        
         // Importar y configurar el scanner
         const initScanner = async () => {
           try {
@@ -632,10 +671,10 @@ export default function Home() {
                 width: 250,
                 height: 250,
               },
-              fps: 20,
+              fps: 10, // Reducido para mejor rendimiento
               // 👇 ESTA ES LA CLAVE para la cámara trasera
-            camera: { 
-            facingMode: "environment" 
+              camera: { 
+                facingMode: "environment" 
               },
             });
 
@@ -643,6 +682,7 @@ export default function Home() {
             
             // Guardar referencia del scanner para poder limpiarlo
             window.currentScanner = scanner;
+            console.log("Scanner inicializado correctamente");
           } catch (error) {
             console.error("Error al cargar el scanner:", error);
             toast.error("Error al cargar el escáner QR. Intente nuevamente.");
@@ -650,13 +690,15 @@ export default function Home() {
           }
         };
 
-        initScanner();
+        // Pequeño delay para asegurar que el DOM esté listo
+        setTimeout(initScanner, 100);
       } else {
         // Limpiar scanner cuando se cierra el modal
         if (window.currentScanner) {
           try {
             window.currentScanner.clear();
             window.currentScanner = null;
+            console.log("Scanner limpiado al cerrar modal");
           } catch (error) {
             console.warn("Error al limpiar scanner:", error);
           }
@@ -1138,6 +1180,22 @@ export default function Home() {
               <div className="text-center mb-6">
                 <h1 className="text-2xl font-bold mb-2">📷 Escáner de Código QR</h1>
                 <p className="text-gray-600">Apunta la cámara al código QR del estudiante para registrar su asistencia</p>
+                {isProcessingScan && (
+                  <div className="mt-4 p-4 bg-orange-100 border-2 border-orange-400 rounded-lg">
+                    <div className="flex items-center justify-center">
+                      <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-orange-600 mr-3"></div>
+                      <div className="text-center">
+                        <span className="text-orange-800 font-bold text-lg">
+                          {scanCooldownTime > 0 
+                            ? `Cargando en ${scanCooldownTime} segundos...` 
+                            : '🔄 Procesando escaneo...'
+                          }
+                        </span>
+
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
               
               <div id="reader" className="w-full max-w-2xl"></div>
