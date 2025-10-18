@@ -550,32 +550,22 @@ Sistema de Asistencia Escolar
     // Reproducir sonido de beep
     playScanSound();
     
-    // Registrar asistencia
-    const matriculaLeida = result.trim();
-    
-    // Buscar el estudiante para mostrar su nombre
-    const student = students.find(s => s.matricula === matriculaLeida);
-    const studentName = student ? student.nombre : 'Estudiante';
-    
-    // Mostrar resultado temporal en el elemento result
+    // Mostrar resultado en el elemento result
     const resultElement = document.getElementById('result');
     if (resultElement) {
       resultElement.innerHTML = `
-        <div style="color: #4CAF50; margin-bottom: 10px; font-weight: bold;">✅ ¡Asistencia registrada!</div>
-        <p style="color: #2196F3; font-weight: bold;">${studentName}</p>
-        <p style="color: #666; font-size: 0.9em;">Matrícula: ${matriculaLeida}</p>
+        <h2 style="color: #4CAF50; margin-bottom: 10px;">Success!</h2>
+        <p><a href="${result}" target="_blank" style="color: #2196F3; text-decoration: none; word-break: break-all;">${result}</a></p>
       `;
-      
-      // Limpiar el resultado después de 4 segundos
-      setTimeout(() => {
-        resultElement.innerHTML = '';
-      }, 4000);
     }
     
+    // Registrar asistencia
+    const matriculaLeida = result.trim();
     await registerAttendance(matriculaLeida);
     
-    // NO cerrar el scanner - mantenerlo abierto para más escaneos
-  }, [registerAttendance, playScanSound, students]);
+    // Cerrar el scanner después del escaneo exitoso
+    setScannerOpen(false);
+  }, [registerAttendance, playScanSound]);
 
   // Función de error del escaneo
   const onScanFailure = useCallback((error) => {
@@ -590,21 +580,16 @@ Sistema de Asistencia Escolar
         try {
           const { Html5QrcodeScanner } = await import("html5-qrcode");
           
-          // Detectar si es móvil para usar solo cámara trasera
-          const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
-          
           const scanner = new Html5QrcodeScanner('reader', { 
             qrbox: {
               width: 250,
               height: 250,
             },
             fps: 20,
-            // Configuración para móviles - usar solo cámara trasera
-            ...(isMobile && {
-              supportedScanTypes: [Html5QrcodeScanner.SCAN_TYPE_CAMERA],
-              showTorchButtonIfSupported: true,
-              showZoomSliderIfSupported: true,
-            })
+            // 👇 ESTA ES LA CLAVE para la cámara trasera
+           camera: { 
+          facingMode: "environment" 
+            },
           });
 
           scanner.render(onScanSuccess, onScanFailure);
@@ -771,39 +756,35 @@ Sistema de Asistencia Escolar
                 animate={{ opacity: 1, y: 0 }}
                 className="mt-8 bg-white border p-6 rounded-2xl shadow-sm"
               >
-                <div className="mb-4">
-                  <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4 mb-4">
-                    <div>
-                      <h3 className="font-medium text-lg">Panel de administración</h3>
-                      <p className="text-sm text-gray-500">
-                        {filteredStudents.length} de {students.length} alumnos
-                      </p>
-                    </div>
-                    <div className="flex flex-col sm:flex-row gap-2">
-                      <button 
-                        onClick={refreshAttendance} 
-                        className="bg-blue-500 hover:bg-blue-600 text-white px-3 py-2 rounded-md shadow-md transition duration-200 text-sm"
-                      >
-                        🔄 Refrescar Asistencias
-                      </button>
-                      <button
-                        onClick={exportAttendancePDF}
-                        className="px-3 py-2 border rounded-md bg-green-500 text-white hover:bg-green-600 text-sm"
-                        disabled={saving}
-                      >
-                        📄 Exportar PDF
-                      </button>
-                    </div>
+                <div className="flex justify-between items-center mb-4">
+                  <div>
+                    <h3 className="font-medium text-lg">Panel de administración</h3>
+                    <p className="text-sm text-gray-500">
+                      {filteredStudents.length} de {students.length} alumnos
+                    </p>
                   </div>
-                  
-                  <div className="w-full">
-                    <input
-                      placeholder="Buscar por nombre, matrícula o teléfono..."
-                      value={search}
-                      onChange={(e) => setSearch(e.target.value)}
-                      className="w-full border rounded-md px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                    />
+                  <div>
+                  <button onClick={refreshAttendance} className="bg-blue-500 hover:bg-blue-600 text-white px-3 py-1 rounded-md shadow-md transition duration-200 ml-2">Refrescar Asistencias</button> 
                   </div>
+                  <div>
+
+                  <button
+  onClick={exportAttendancePDF}
+  className="px-3 py-2 border rounded-md bg-green-500 text-white hover:bg-green-600 ml-2"
+  disabled={saving}
+>
+  📄 Exportar Asistencias (PDF)
+</button>
+
+</div>
+
+
+                  <input
+                    placeholder="Buscar por nombre, matrícula o teléfono..."
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                    className="border rounded-md px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  />
                 </div>
 
                 <div className="grid gap-3">
@@ -1068,8 +1049,9 @@ Sistema de Asistencia Escolar
         </motion.div>
       )}
 
-      {/* Scanner QR modal */}
-      {scannerOpen && (
+        {/* Scanner QR modal */}
+        {/* Scanner QR modal */}
+        {scannerOpen && (
         <div className="fixed inset-0 z-50 bg-white flex items-center justify-center">
           <button
             onClick={() => setScannerOpen(false)}
