@@ -67,6 +67,7 @@ export default function Home() {
   const [isProcessingScan, setIsProcessingScan] = useState(false);
   const [scanCooldownTime, setScanCooldownTime] = useState(0);
   const [scanResult, setScanResult] = useState(null); // 'success' | 'already_registered' | null
+  const [scannedStudentName, setScannedStudentName] = useState('');
 
   // ===== UTILITY FUNCTIONS =====
   // Export PDF function
@@ -607,7 +608,7 @@ export default function Home() {
     }
 
     try {
-      // Reproducir sonido de escáner
+      // SIEMPRE reproducir sonido de escáner al detectar QR
       playScanSound();
       
       // Procesar el registro de asistencia y determinar el resultado
@@ -615,6 +616,9 @@ export default function Home() {
       const student = students.find(s => s.matricula === matriculaLeida);
       
       if (student) {
+        // Guardar nombre del estudiante para mostrar en pantalla de carga
+        setScannedStudentName(student.nombre);
+        
         const today = getLocalDateYMD();
         const alreadyMarked = student.asistencias?.some(a => a.fecha === today);
         
@@ -628,6 +632,7 @@ export default function Home() {
         }
       } else {
         // Matrícula no encontrada - pantalla roja
+        setScannedStudentName('Estudiante no encontrado');
         setScanResult('already_registered');
       }
       
@@ -645,6 +650,7 @@ export default function Home() {
             setIsProcessingScan(false);
             setIsScanningActive(true);
             setScanResult(null);
+            setScannedStudentName('');
             console.log("Scanner reactivado después del delay");
             return 0;
           }
@@ -1196,13 +1202,6 @@ export default function Home() {
           {/* Scanner QR modal */}
           {scannerOpen && (
           <div className="fixed inset-0 z-50 bg-white flex items-center justify-center">
-            <button
-              onClick={() => setScannerOpen(false)}
-              className="absolute top-4 right-4 z-10 px-4 py-2 bg-red-600 text-white rounded-lg shadow-lg hover:bg-red-700 transition-colors"
-            >
-              ✕ Cerrar
-            </button>
-            
             {/* Pantalla de carga completa durante el cooldown */}
             {isProcessingScan && scanResult && (
               <div className={`fixed inset-0 z-60 flex items-center justify-center ${
@@ -1226,6 +1225,13 @@ export default function Home() {
                     }
                   </h2>
                   
+                  {/* Mostrar nombre del estudiante */}
+                  {scannedStudentName && (
+                    <div className="text-2xl font-semibold mb-4 text-white bg-black bg-opacity-20 px-4 py-2 rounded-lg">
+                      👤 {scannedStudentName}
+                    </div>
+                  )}
+                  
                   <div className="text-2xl font-semibold mb-2">
                     ⏰ {scanCooldownTime} segundos
                   </div>
@@ -1248,6 +1254,14 @@ export default function Home() {
               <div className="text-center mb-6">
                 <h1 className="text-2xl font-bold mb-2">📷 Escáner de Código QR</h1>
                 <p className="text-gray-600">Apunta la cámara al código QR del estudiante para registrar su asistencia</p>
+                
+                {/* Botón de salir movido aquí */}
+                <button
+                  onClick={() => setScannerOpen(false)}
+                  className="mt-4 px-6 py-3 bg-red-600 text-white rounded-lg shadow-lg hover:bg-red-700 transition-colors font-medium"
+                >
+                  ✕ Cerrar Escáner
+                </button>
               </div>
               
               <div id="reader" className="w-full max-w-2xl"></div>
