@@ -100,41 +100,12 @@
       }, SCAN_DEBOUNCE_MS);
 
 
-    }, [registerAttendance, playScanSound, isScanningActive]); // 👈 ¡Actualiza las dependencias!
-
-
-
-
-        // 👇 NUEVO ESTADO: Variables para el reporte de asistencias
-      const [error, setError] = useState(null);
-      const [now, setNow] = useState(null);
-      const [testRefreshEnabled, setTestRefreshEnabled] = useState(false);
-      const [isScanningActive, setIsScanningActive] = useState(true);
-    
-      // 👇 NUEVO ESTADO: Interruptor para evitar escaneos duplicados rápidos
-
-      const doc = new jsPDF();
-    
+    }, [registerAttendance, playScanSound, isScanningActive]); // 👈 ¡Actualiza las dependencias!    
       const todayStrFull = new Date().toLocaleDateString("es-MX", {
         weekday: "long", year: "numeric", month: "long", day: "numeric"
       });
     
-      const alert = useCallback((message, type = 'success', duration = 3000) => {
-        // 1. Limpia cualquier timeout anterior para evitar solapamiento
-        if (notificationTimeoutRef.current) {
-          clearTimeout(notificationTimeoutRef.current);
-        }
-    
-        // 2. Muestra la nueva notificación actualizando el estado
-        setNotification({ message, type });
-    
-        // 3. Establece el timeout para ocultarla
-        const timeout = setTimeout(() => {
-          setNotification(null);
-        }, duration);
-    
-        notificationTimeoutRef.current = timeout;
-      }, []);
+
       
       doc.setFontSize(16);
       doc.text("Reporte de Asistencias", 14, 20);
