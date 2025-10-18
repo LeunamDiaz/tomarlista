@@ -35,30 +35,7 @@
 
 
   export default function Home() {
-    const exportAttendancePDF = () => {
-      if (!students || students.length === 0) {
-        toast.error("No hay alumnos para generar el reporte.");
-        return;
-      }
-
-      function App() {
-        const showSuccess = () => {
-          toast.success("¡Datos guardados correctamente!");
-        };
-      
-        const showError = () => {
-          toast.error("Ocurrió un error al guardar.");
-        };
-      
-        return (
-          <div>
-            <button onClick={showSuccess}>Mostrar éxito</button>
-            <button onClick={showError}>Mostrar error</button>
-      
-            <ToastContainer position="top-right" autoClose={3000} />
-          </div>
-        );
-      }
+ 
 
   const SCAN_DEBOUNCE_MS = 4000; 
 
@@ -1161,7 +1138,6 @@
         )}
       </div> 
     );
-  }
 
   function AddStudentForm({ onCancel, onSave, isSubmitting }) {
     const [matricula, setMatricula] = useState("");
