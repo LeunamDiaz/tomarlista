@@ -66,6 +66,7 @@ export default function Home() {
   const [qrGenerating, setQrGenerating] = useState(false);
   const [isProcessingScan, setIsProcessingScan] = useState(false);
   const [scanCooldownTime, setScanCooldownTime] = useState(0);
+  const [scanResult, setScanResult] = useState(null); // 'success' | 'already_registered' | null
 
   // ===== UTILITY FUNCTIONS =====
   // Export PDF function
@@ -583,7 +584,7 @@ export default function Home() {
     }, []);
 
   // ===== SCANNER FUNCTIONS =====
-  // Función de éxito del escaneo con pausa efectiva MEJORADA
+  // Función de éxito del escaneo con pantalla de carga completa
   const onScanSuccess = useCallback(async (result) => {
     // 🛑 BLOQUEO INMEDIATO: Si ya estamos procesando un escaneo, ignorar COMPLETAMENTE
     if (isProcessingScan || !isScanningActive) {
@@ -609,23 +610,32 @@ export default function Home() {
       // Reproducir sonido de escáner
       playScanSound();
       
-      // Mostrar resultado del escaneo
-      const resultElement = document.getElementById('result');
-      if (resultElement) {
-        resultElement.innerHTML = `
-          <h2 style="color: #4CAF50; margin-bottom: 10px;">QR Escaneado!</h2>
-          <p style="font-weight: bold; word-break: break-all;">${result}</p>
-        `;
-      }
-      
-      // Procesar el registro de asistencia
+      // Procesar el registro de asistencia y determinar el resultado
       const matriculaLeida = result.trim();
-      await registerAttendance(matriculaLeida);
+      const student = students.find(s => s.matricula === matriculaLeida);
+      
+      if (student) {
+        const today = getLocalDateYMD();
+        const alreadyMarked = student.asistencias?.some(a => a.fecha === today);
+        
+        if (alreadyMarked && !testRefreshEnabled) {
+          // Ya registrado - pantalla roja
+          setScanResult('already_registered');
+        } else {
+          // Registro exitoso - pantalla verde
+          setScanResult('success');
+          await registerAttendance(matriculaLeida);
+        }
+      } else {
+        // Matrícula no encontrada - pantalla roja
+        setScanResult('already_registered');
+      }
       
     } catch (error) {
       console.error("Error procesando escaneo:", error);
+      setScanResult('already_registered');
     } finally {
-      // PAUSA DE 3 SEGUNDOS con countdown visual MEJORADO
+      // PAUSA DE 3 SEGUNDOS con pantalla de carga completa
       setScanCooldownTime(3);
       const countdownInterval = setInterval(() => {
         setScanCooldownTime(prev => {
@@ -634,6 +644,7 @@ export default function Home() {
             // REACTIVAR el scanner después del delay
             setIsProcessingScan(false);
             setIsScanningActive(true);
+            setScanResult(null);
             console.log("Scanner reactivado después del delay");
             return 0;
           }
@@ -641,7 +652,7 @@ export default function Home() {
         });
       }, 1000);
     }
-  }, [isProcessingScan, isScanningActive, playScanSound, registerAttendance]);
+  }, [isProcessingScan, isScanningActive, playScanSound, registerAttendance, students, testRefreshEnabled]);
 
     // Función de error del escaneo
     const onScanFailure = useCallback((error) => {
@@ -1183,7 +1194,6 @@ export default function Home() {
         )}
 
           {/* Scanner QR modal */}
-          {/* Scanner QR modal */}
           {scannerOpen && (
           <div className="fixed inset-0 z-50 bg-white flex items-center justify-center">
             <button
@@ -1193,26 +1203,51 @@ export default function Home() {
               ✕ Cerrar
             </button>
             
+            {/* Pantalla de carga completa durante el cooldown */}
+            {isProcessingScan && scanResult && (
+              <div className={`fixed inset-0 z-60 flex items-center justify-center ${
+                scanResult === 'success' 
+                  ? 'bg-green-500' 
+                  : 'bg-red-500'
+              }`}>
+                <div className="text-center text-white">
+                  <div className="mb-6">
+                    {scanResult === 'success' ? (
+                      <div className="text-8xl mb-4">✅</div>
+                    ) : (
+                      <div className="text-8xl mb-4">❌</div>
+                    )}
+                  </div>
+                  
+                  <h2 className="text-4xl font-bold mb-4">
+                    {scanResult === 'success' 
+                      ? '¡Asistencia Registrada!' 
+                      : 'Ya Registrado Hoy'
+                    }
+                  </h2>
+                  
+                  <div className="text-2xl font-semibold mb-2">
+                    ⏰ {scanCooldownTime} segundos
+                  </div>
+                  
+                  <p className="text-lg opacity-90">
+                    {scanResult === 'success' 
+                      ? 'Esperando para próximo escaneo...' 
+                      : 'El estudiante ya marcó asistencia hoy'
+                    }
+                  </p>
+                  
+                  <div className="mt-8">
+                    <div className="w-16 h-16 border-4 border-white border-t-transparent rounded-full animate-spin mx-auto"></div>
+                  </div>
+                </div>
+              </div>
+            )}
+            
             <div className="w-full h-full flex flex-col items-center justify-center p-4">
               <div className="text-center mb-6">
                 <h1 className="text-2xl font-bold mb-2">📷 Escáner de Código QR</h1>
                 <p className="text-gray-600">Apunta la cámara al código QR del estudiante para registrar su asistencia</p>
-                {isProcessingScan && (
-                  <div className="mt-4 p-4 bg-orange-100 border-2 border-orange-400 rounded-lg">
-                    <div className="flex items-center justify-center">
-                      <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-orange-600 mr-3"></div>
-                      <div className="text-center">
-                        <span className="text-orange-800 font-bold text-lg">
-                          {scanCooldownTime > 0 
-                            ? `Cargando en ${scanCooldownTime} segundos...` 
-                            : '🔄 Procesando escaneo...'
-                          }
-                        </span>
-
-                      </div>
-                    </div>
-                  </div>
-                )}
               </div>
               
               <div id="reader" className="w-full max-w-2xl"></div>
