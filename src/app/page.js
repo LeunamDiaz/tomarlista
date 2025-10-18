@@ -34,29 +34,88 @@
 
 
 
-  export default function Home() {
-    const SCAN_DEBOUNCE_MS = 4000;
+export default function Home() {
+  // ===== CONSTANTS =====
+  const SCAN_DEBOUNCE_MS = 4000;
+
+  // ===== STATE HOOKS =====
+  // Admin authentication state
+  const [adminAuthenticated, setAdminAuthenticated] = useState(false);
+  const [adminPasswordInput, setAdminPasswordInput] = useState("");
+  const [showAdminLogin, setShowAdminLogin] = useState(true);
+  const [adminOpen, setAdminOpen] = useState(false);
+  const [adminSessionTimeout, setAdminSessionTimeout] = useState(null);
+  
+  // Student management state
+  const [students, setStudents] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [search, setSearch] = useState("");
+  const [selected, setSelected] = useState(null);
+  const [showAdd, setShowAdd] = useState(false);
+  
+  // Attendance registration state
+  const [matriculaInput, setMatriculaInput] = useState("");
+  const [error, setError] = useState(null);
+  const [now, setNow] = useState(null);
+  const [testRefreshEnabled, setTestRefreshEnabled] = useState(false);
+  
+  // QR Scanner state
+  const [isScanningActive, setIsScanningActive] = useState(true);
+  const [scannerOpen, setScannerOpen] = useState(false);
+  const [qrGenerating, setQrGenerating] = useState(false);
+
+  // ===== UTILITY FUNCTIONS =====
+  // Export PDF function
+  const exportAttendancePDF = useCallback(() => {
+    if (!adminAuthenticated) {
+      setError("Solo los administradores pueden exportar reportes.");
+      return;
+    }
+
+    const doc = new jsPDF();
+    const today = new Date();
+    const todayStrFull = today.toLocaleDateString("es-MX", {
+      weekday: "long",
+      year: "numeric",
+      month: "long",
+      day: "numeric",
+    });
     
-    const [adminAuthenticated, setAdminAuthenticated] = useState(false);
-    const [adminPasswordInput, setAdminPasswordInput] = useState("");
-    const [showAdminLogin, setShowAdminLogin] = useState(true); // Mostrar login al cargar
-    const [adminOpen, setAdminOpen] = useState(false);
-    const [showAdd, setShowAdd] = useState(false);
-    const [adminSessionTimeout, setAdminSessionTimeout] = useState(null);
-    const [isScanningActive, setIsScanningActive] = useState(true);
+    doc.setFontSize(16);
+    doc.text("Reporte de Asistencias", 14, 20);
+    doc.setFontSize(12);
+    doc.text(`Fecha: ${todayStrFull}`, 14, 28);
+  
+    // Encabezados de tabla
+    const tableColumn = ["Matrícula", "Alumno", "Estado", "Hora"];
+    const tableRows = [];
+  
+    const todayYMD = getLocalDateYMD();
+  
+    students.forEach(s => {
+      const asistenciaHoy = s.asistencias?.find(a => a.fecha === todayYMD);
+      const estado = asistenciaHoy ? "Presente" : "Ausente";
+      const hora = asistenciaHoy ? asistenciaHoy.hora : "-";
+  
+      tableRows.push([s.matricula, s.nombre, estado, hora]);
+    });
+  
+    // Ajuste de columnas y tabla
+    let startY = 36;
+    doc.autoTable({
+      head: [tableColumn],
+      body: tableRows,
+      startY,
+      styles: { fontSize: 10 },
+      headStyles: { fillColor: [41, 128, 185] },
+    });
+  
+    doc.save(`Asistencias_${todayYMD}.pdf`);
+  }, [adminAuthenticated, students]);
 
-    const [matriculaInput, setMatriculaInput] = useState("");
-    const [students, setStudents] = useState([]);
-    const [loading, setLoading] = useState(true);
-    const [saving, setSaving] = useState(false);
-    const [search, setSearch] = useState("");
-    const [selected, setSelected] = useState(null);
-    const [error, setError] = useState(null);
-
-    const [now, setNow] = useState(null);
-    const [testRefreshEnabled, setTestRefreshEnabled] = useState(false);
-
-    // Auto-logout admin después del timeout
+  // ===== EFFECTS =====
+  // Auto-logout admin después del timeout
     useEffect(() => {
       if (adminAuthenticated) {
         const timeout = setTimeout(() => {
@@ -80,7 +139,8 @@
       const t = setInterval(() => setNow(new Date()), 60000);
       return () => clearInterval(t);
     }, []);
-    const refreshAttendance = async () => {
+  // ===== ADMIN FUNCTIONS =====
+  const refreshAttendance = async () => {
       const ok = confirm(
         "¿Desea reiniciar el estado de sesión de asistencias para TODOS los alumnos? (historial intacto)"
       );
@@ -131,51 +191,9 @@
         setSaving(false);
       }
     };
-
-    // Función para exportar asistencias a PDF
-    const exportAttendancePDF = () => {
-      const doc = new jsPDF();
-      const todayStrFull = new Date().toLocaleDateString("es-MX", {
-        weekday: "long",
-        year: "numeric",
-        month: "long",
-        day: "numeric",
-      });
-      
-      doc.setFontSize(16);
-      doc.text("Reporte de Asistencias", 14, 20);
-      doc.setFontSize(12);
-      doc.text(`Fecha: ${todayStrFull}`, 14, 28);
     
-      // Encabezados de tabla
-      const tableColumn = ["Matrícula", "Alumno", "Estado", "Hora"];
-      const tableRows = [];
-    
-      const todayYMD = getLocalDateYMD();
-    
-      students.forEach(s => {
-        const asistenciaHoy = s.asistencias?.find(a => a.fecha === todayYMD);
-        const estado = asistenciaHoy ? "Presente" : "Ausente";
-        const hora = asistenciaHoy ? asistenciaHoy.hora : "-";
-    
-        tableRows.push([s.matricula, s.nombre, estado, hora]);
-      });
-    
-      // Ajuste de columnas y tabla
-      let startY = 36;
-      doc.autoTable({
-        head: [tableColumn],
-        body: tableRows,
-        startY,
-        styles: { fontSize: 10 },
-        headStyles: { fillColor: [41, 128, 185] },
-      });
-    
-      doc.save(`Asistencias_${todayYMD}.pdf`);
-    };
-    
-
-    // 🔹 Cargar estudiantes desde Firebase (optimizado)
+  // ===== DATA MANAGEMENT FUNCTIONS =====
+  // 🔹 Cargar estudiantes desde Firebase (optimizado)
     const fetchStudents = useCallback(async () => {
       try {
         setError(null);
@@ -306,7 +324,8 @@
       }
     }, [students, testRefreshEnabled]);
 
-    // 🔹 Login admin mejorado
+  // ===== AUTHENTICATION FUNCTIONS =====
+  // 🔹 Login admin mejorado
     const handleAdminLogin = useCallback((e) => {
       e?.preventDefault();
       if (adminPasswordInput === ADMIN_PASSWORD) {
@@ -341,7 +360,8 @@
       }
     }, [adminAuthenticated]);
 
-    // 🔹 Agregar estudiante (optimizado)
+  // ===== STUDENT MANAGEMENT FUNCTIONS =====
+  // 🔹 Agregar estudiante (optimizado)
     const addStudent = useCallback(async (newStudent) => {
       if (!adminAuthenticated) {
         setShowAdminLogin(true);
@@ -454,7 +474,8 @@
       }
     }, [adminAuthenticated, students, selected]);
 
-    // 🔹 Notificar ausencia por WhatsApp (abre WhatsApp con mensaje generado)
+  // ===== NOTIFICATION FUNCTIONS =====
+  // 🔹 Notificar ausencia por WhatsApp (abre WhatsApp con mensaje generado)
     const notifyAbsence = useCallback((student) => {
       if (!adminAuthenticated) {
         setError("Solo los administradores pueden enviar notificaciones.");
@@ -502,11 +523,8 @@
       }
     }, [adminAuthenticated]);
 
-    // QR / scanner states
-    const [scannerOpen, setScannerOpen] = useState(false);
-    const [qrGenerating, setQrGenerating] = useState(false);
-
-    // Generar dataURL de QR para una matrícula
+  // ===== QR CODE FUNCTIONS =====
+  // Generar dataURL de QR para una matrícula
     const getQrDataUrl = useCallback(async (matricula) => {
       try {
         return await QRCode.toDataURL(String(matricula), { margin: 1, width: 320 });
@@ -564,36 +582,37 @@
       }
     }, []);
 
-    // Función de éxito del escaneo
-    const onScanSuccess = useCallback(async (result) => {
-      // 🛑 1. BLOQUEO: Si el escaneo está inactivo (estamos procesando), ignora esta lectura
-      if (!isScanningActive) return;
-      
-      // 🛑 2. DESACTIVA EL ESCANEO inmediatamente para evitar el rebote
-      setIsScanningActive(false);
+  // ===== SCANNER FUNCTIONS =====
+  // Función de éxito del escaneo (optimizada)
+  const onScanSuccess = useCallback(async (result) => {
+    // 🛑 1. BLOQUEO: Si el escaneo está inactivo (estamos procesando), ignora esta lectura
+    if (!isScanningActive) return;
+    
+    // 🛑 2. DESACTIVA EL ESCANEO inmediatamente para evitar el rebote
+    setIsScanningActive(false);
 
-      // Reproducir sonido de beep
-      playScanSound();
-      
-      // Código de prueba para mostrar el QR detectado (opcional)
-      const resultElement = document.getElementById('result');
-      if (resultElement) {
-        resultElement.innerHTML = `
-          <h2 style="color: #4CAF50; margin-bottom: 10px;">QR Escaneado!</h2>
-          <p style="font-weight: bold; word-break: break-all;">${result}</p>
-        `;
-      }
-      
-      // 3. PROCESA el registro de asistencia
-      const matriculaLeida = result.trim();
-      await registerAttendance(matriculaLeida);
-      
-      // 4. VUELVE A ACTIVAR EL ESCANEO después de un tiempo (para permitir otro escaneo)
-      // Esto es crucial si la cámara permanece abierta.
-      setTimeout(() => {
-        setIsScanningActive(true);
-      }, SCAN_DEBOUNCE_MS);
-    }, [isScanningActive, playScanSound, registerAttendance, SCAN_DEBOUNCE_MS]);
+    // Reproducir sonido de beep
+    playScanSound();
+    
+    // Código de prueba para mostrar el QR detectado (opcional)
+    const resultElement = document.getElementById('result');
+    if (resultElement) {
+      resultElement.innerHTML = `
+        <h2 style="color: #4CAF50; margin-bottom: 10px;">QR Escaneado!</h2>
+        <p style="font-weight: bold; word-break: break-all;">${result}</p>
+      `;
+    }
+    
+    // 3. PROCESA el registro de asistencia
+    const matriculaLeida = result.trim();
+    await registerAttendance(matriculaLeida);
+    
+    // 4. VUELVE A ACTIVAR EL ESCANEO después de un tiempo (para permitir otro escaneo)
+    // Esto es crucial si la cámara permanece abierta.
+    setTimeout(() => {
+      setIsScanningActive(true);
+    }, SCAN_DEBOUNCE_MS);
+  }, [isScanningActive, playScanSound, registerAttendance, SCAN_DEBOUNCE_MS]);
 
     // Función de error del escaneo
     const onScanFailure = useCallback((error) => {
@@ -645,7 +664,8 @@
       }
     }, [scannerOpen, onScanSuccess, onScanFailure]);
 
-    // 🔹 Memoizar cálculos para mejor rendimiento
+  // ===== COMPUTED VALUES =====
+  // 🔹 Memoizar cálculos para mejor rendimiento
     const todayStr = useMemo(() => getLocalDateYMD(now || new Date()), [now]);
     
     const filteredStudents = useMemo(() => {
@@ -659,10 +679,11 @@
       );
     }, [students, search]);
 
-    return (
-      <div className="min-h-screen bg-white text-gray-900">
-        <header className="max-w-5xl mx-auto px-4 sm:px-6 py-6 sm:py-8">
-          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+  // ===== RENDER =====
+  return (
+    <div className="min-h-screen bg-white text-gray-900">
+        <header className="max-w-5xl mx-auto px-4 sm:px-6 py-4 sm:py-6">
+          <div className="flex flex-col gap-4">
             <div>
               <h1 className="text-2xl sm:text-3xl font-semibold">📚 Asistencia</h1>
               <p className="text-sm text-gray-600">Gestión simple y segura</p>
@@ -672,10 +693,10 @@
                 </p>
               )}
             </div>
-            <nav className="flex flex-wrap gap-2 sm:gap-3 w-full sm:w-auto">
+            <nav className="flex flex-col sm:flex-row gap-2 sm:gap-3">
               <button
                 onClick={handlePanelClick}
-                className={`flex-1 sm:flex-none px-3 py-2 border rounded-lg hover:bg-gray-100 text-sm font-medium ${
+                className={`flex-1 sm:flex-none px-4 py-3 border rounded-lg hover:bg-gray-100 text-sm font-medium transition-colors ${
                   adminAuthenticated ? 'border-green-500 text-green-700 bg-green-50' : 'border-gray-900'
                 }`}
               >
@@ -686,7 +707,7 @@
                   if (!adminAuthenticated) return setShowAdminLogin(true);
                   setShowAdd(true);
                 }}
-                className="flex-1 sm:flex-none px-3 py-2 border border-gray-300 rounded-lg hover:bg-gray-100 text-sm font-medium"
+                className="flex-1 sm:flex-none px-4 py-3 border border-gray-300 rounded-lg hover:bg-gray-100 text-sm font-medium transition-colors"
                 disabled={saving}
               >
                 ➕ Alumno
@@ -694,7 +715,7 @@
               {adminAuthenticated && (
                 <button
                   onClick={handleAdminLogout}
-                  className="flex-1 sm:flex-none px-3 py-2 border border-red-300 text-red-600 rounded-lg hover:bg-red-50 text-sm font-medium"
+                  className="flex-1 sm:flex-none px-4 py-3 border border-red-300 text-red-600 rounded-lg hover:bg-red-50 text-sm font-medium transition-colors"
                 >
                   🚪 Salir
                 </button>
@@ -744,14 +765,14 @@
                 </div>
 
                 {/* Botones en layout responsive */}
-                <div className="flex flex-col sm:flex-row gap-3 mb-4">
+                <div className="flex flex-col gap-3 mb-4">
                   <button
                     type="button"
                     onClick={(e) => {
                       e.preventDefault();
                       registerAttendance(matriculaInput.trim());
                     }}
-                    className="flex-1 px-6 py-3 bg-blue-500 text-white rounded-lg font-semibold hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed text-lg"
+                    className="w-full px-6 py-3 bg-blue-500 text-white rounded-lg font-semibold hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed text-lg transition-colors"
                     disabled={saving || !matriculaInput.trim()}
                   >
                     {saving ? "Registrando..." : "✅ Registrar"}
@@ -759,7 +780,7 @@
                   <button
                     type="button"
                     onClick={() => setScannerOpen(true)}
-                    className="flex-1 sm:flex-none px-6 py-3 border-2 border-green-500 text-green-600 rounded-lg hover:bg-green-50 font-semibold text-lg"
+                    className="w-full px-6 py-3 border-2 border-green-500 text-green-600 rounded-lg hover:bg-green-50 font-semibold text-lg transition-colors"
                     disabled={saving}
                   >
                     📷 Escanear QR
@@ -767,11 +788,11 @@
                 </div>
 
                 {/* Información adicional */}
-                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center text-sm text-gray-500 gap-2">
-                  <span>
+                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center text-sm text-gray-500 gap-2 pt-2 border-t border-gray-100">
+                  <span className="flex items-center gap-1">
                     🕐 {now ? now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "--:--"}
                   </span>
-                  <span>
+                  <span className="flex items-center gap-1">
                     👥 {students.length} alumnos registrados
                   </span>
                 </div>
@@ -796,35 +817,43 @@
                   animate={{ opacity: 1, y: 0 }}
                   className="mt-8 bg-white border p-6 rounded-2xl shadow-sm"
                 >
-                  <div className="flex justify-between items-center mb-4">
-                    <div>
-                      <h3 className="font-medium text-lg">Panel de administración</h3>
-                      <p className="text-sm text-gray-500">
-                        {filteredStudents.length} de {students.length} alumnos
-                      </p>
+                  <div className="mb-6">
+                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-4">
+                      <div>
+                        <h3 className="font-medium text-lg">Panel de administración</h3>
+                        <p className="text-sm text-gray-500">
+                          {filteredStudents.length} de {students.length} alumnos
+                        </p>
+                      </div>
                     </div>
-                    <div>
-                    <button onClick={refreshAttendance} className="bg-blue-500 hover:bg-blue-600 text-white px-3 py-1 rounded-md shadow-md transition duration-200 ml-2">Refrescar Asistencias</button> 
+                    
+                    {/* Botones de acción */}
+                    <div className="flex flex-col sm:flex-row gap-2 mb-4">
+                      <button 
+                        onClick={refreshAttendance} 
+                        className="flex-1 sm:flex-none bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded-md shadow-md transition duration-200 text-sm font-medium"
+                        disabled={saving}
+                      >
+                        🔄 Refrescar Asistencias
+                      </button> 
+                      <button
+                        onClick={exportAttendancePDF}
+                        className="flex-1 sm:flex-none px-4 py-2 border rounded-md bg-green-500 text-white hover:bg-green-600 text-sm font-medium"
+                        disabled={saving}
+                      >
+                        📄 Exportar PDF
+                      </button>
                     </div>
-                    <div>
 
-                    <button
-    onClick={exportAttendancePDF}
-    className="px-3 py-2 border rounded-md bg-green-500 text-white hover:bg-green-600 ml-2"
-    disabled={saving}
-  >
-    📄 Exportar Asistencias (PDF)
-  </button>
-
-  </div>
-
-
-                    <input
-                      placeholder="Buscar por nombre, matrícula o teléfono..."
-                      value={search}
-                      onChange={(e) => setSearch(e.target.value)}
-                      className="border rounded-md px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                    />
+                    {/* Buscador */}
+                    <div className="w-full">
+                      <input
+                        placeholder="Buscar por nombre, matrícula o teléfono..."
+                        value={search}
+                        onChange={(e) => setSearch(e.target.value)}
+                        className="w-full border rounded-lg px-4 py-3 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                      />
+                    </div>
                   </div>
 
                   <div className="grid gap-3">
@@ -859,36 +888,36 @@
                           <div key={s.id}>
                             <div
                               onClick={() => setSelected(isSelected ? null : s)}
-                              className={`p-4 border-2 rounded-lg cursor-pointer hover:shadow-md transition-shadow ${
+                              className={`p-4 border-2 rounded-lg cursor-pointer hover:shadow-md transition-all duration-200 ${
                                 presenteHoy ? "border-green-500 bg-green-50" : "border-red-500 bg-red-50"
-                              } ${isSelected ? "ring-2 ring-blue-500" : ""}`}
+                              } ${isSelected ? "ring-2 ring-blue-500 shadow-lg" : ""}`}
                             >
-                              <div className="flex justify-between items-start">
-                                <div className="flex-1">
-                                  <div className="font-medium text-lg">{s.nombre}</div>
-                                  <div className="text-sm text-gray-600 mt-1">
+                              <div className="flex justify-between items-start gap-3">
+                                <div className="flex-1 min-w-0">
+                                  <div className="font-medium text-lg truncate">{s.nombre}</div>
+                                  <div className="text-sm text-gray-600 mt-1 truncate">
                                     📋 {s.matricula}
                                   </div>
                                   {s.telefono && (
-                                    <div className="text-sm text-gray-600">
+                                    <div className="text-sm text-gray-600 truncate">
                                       📞 {s.telefono}
                                     </div>
                                   )}
                                   {s.nombrePadre && (
-                                    <div className="text-sm text-gray-600">
+                                    <div className="text-sm text-gray-600 truncate">
                                       👨‍👩‍👧‍👦 {s.nombrePadre}
                                     </div>
                                   )}
                                   {s.telefonoPadre && (
-                                    <div className="text-sm text-gray-600">
+                                    <div className="text-sm text-gray-600 truncate">
                                       📱 {s.telefonoPadre}
                                     </div>
                                   )}
                                   <div className="text-xs text-gray-500 mt-2">
-                                    📊 {totalAsistencias} asistencias registradas
+                                    📊 {totalAsistencias} asistencias
                                   </div>
                                 </div>
-                                <div className="text-right">
+                                <div className="text-right flex-shrink-0">
                                   <div className={`text-sm font-semibold ${
                                     presenteHoy ? "text-green-700" : "text-red-700"
                                   }`}>
@@ -909,83 +938,88 @@
                                 animate={{ opacity: 1, y: 0 }}
                                 className="mt-3 border rounded-2xl p-4 bg-white"
                               >
+                                {/* Header con nombre y botón cerrar */}
                                 <div className="flex justify-between items-start mb-4">
-                                  <div className="flex-1">
-                                    <div className="font-semibold text-xl text-gray-900">{s.nombre}</div>
-                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-3">
-                                      <div className="bg-gray-50 p-3 rounded-lg">
-                                        <div className="text-sm text-gray-500">Matrícula</div>
-                                        <div className="font-medium">{s.matricula}</div>
-                                      </div>
-                                      <div className="bg-gray-50 p-3 rounded-lg">
-                                        <div className="text-sm text-gray-500">Teléfono</div>
-                                        <div className="font-medium">{s.telefono || "No registrado"}</div>
-                                      </div>
-                                      <div className="bg-gray-50 p-3 rounded-lg">
-                                        <div className="text-sm text-gray-500">Padre/Madre/Tutor</div>
-                                        <div className="font-medium">{s.nombrePadre || "No registrado"}</div>
-                                      </div>
-                                      <div className="bg-gray-50 p-3 rounded-lg">
-                                        <div className="text-sm text-gray-500">Teléfono del tutor</div>
-                                        <div className="font-medium">{s.telefonoPadre || "No registrado"}</div>
-                                      </div>
-                                      <div className="bg-gray-50 p-3 rounded-lg md:col-span-2">
-                                        <div className="text-sm text-gray-500">Total asistencias</div>
-                                        <div className="font-medium text-lg">{s.asistencias?.length || 0}</div>
-                                      </div>
-                                    </div>
+                                  <div className="flex-1 min-w-0">
+                                    <div className="font-semibold text-xl text-gray-900 truncate">{s.nombre}</div>
                                   </div>
-                                  <div className="flex gap-2 ml-4">
+                                  <button
+                                    onClick={() => setSelected(null)}
+                                    className="ml-3 px-3 py-2 border border-gray-300 rounded-md text-sm text-gray-600 hover:bg-gray-50 flex-shrink-0"
+                                  >
+                                    ✕ Cerrar
+                                  </button>
+                                </div>
+
+                                {/* Información del alumno */}
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4">
+                                  <div className="bg-gray-50 p-3 rounded-lg">
+                                    <div className="text-sm text-gray-500">Matrícula</div>
+                                    <div className="font-medium text-sm">{s.matricula}</div>
+                                  </div>
+                                  <div className="bg-gray-50 p-3 rounded-lg">
+                                    <div className="text-sm text-gray-500">Teléfono</div>
+                                    <div className="font-medium text-sm">{s.telefono || "No registrado"}</div>
+                                  </div>
+                                  <div className="bg-gray-50 p-3 rounded-lg">
+                                    <div className="text-sm text-gray-500">Padre/Madre/Tutor</div>
+                                    <div className="font-medium text-sm">{s.nombrePadre || "No registrado"}</div>
+                                  </div>
+                                  <div className="bg-gray-50 p-3 rounded-lg">
+                                    <div className="text-sm text-gray-500">Teléfono del tutor</div>
+                                    <div className="font-medium text-sm">{s.telefonoPadre || "No registrado"}</div>
+                                  </div>
+                                  <div className="bg-gray-50 p-3 rounded-lg sm:col-span-2">
+                                    <div className="text-sm text-gray-500">Total asistencias</div>
+                                    <div className="font-medium text-lg">{s.asistencias?.length || 0}</div>
+                                  </div>
+                                </div>
+
+                                {/* Botones de acción - diseño responsive */}
+                                <div className="flex flex-col sm:flex-row gap-2 mb-4">
+                                  {s.telefonoPadre && (
                                     <button
-                                      onClick={() => setSelected(null)}
-                                      className="px-3 py-2 border border-gray-300 rounded-md text-sm text-gray-600 hover:bg-gray-50"
-                                    >
-                                      Cerrar
-                                    </button>
-                                    {s.telefonoPadre && (
-                                      <button
-                                        onClick={() => notifyAbsence(s)}
-                                        className="px-4 py-2 bg-green-500 text-white rounded-md text-sm hover:bg-green-600 font-medium"
-                                        disabled={saving}
-                                      >
-                                        {saving ? "Enviando..." : "📱 Notificar Ausencia"}
-                                      </button>
-                                    )}
-                                    <button
-                                      onClick={() => downloadQr(s.matricula, s.nombre)}
-                                      className="px-4 py-2 border border-gray-300 rounded-md text-sm text-gray-700 hover:bg-gray-50"
-                                      disabled={qrGenerating}
-                                    >
-                                      {qrGenerating ? "Generando..." : "⬇️ Descargar QR"}
-                                    </button>
-                                    <button
-                                      onClick={() => deleteStudent(s.matricula)}
-                                      className="px-4 py-2 border border-red-500 rounded-md text-sm text-red-600 hover:bg-red-50 font-medium"
+                                      onClick={() => notifyAbsence(s)}
+                                      className="flex-1 px-4 py-2 bg-green-500 text-white rounded-md text-sm hover:bg-green-600 font-medium"
                                       disabled={saving}
                                     >
-                                      {saving ? "Eliminando..." : "🗑️ Eliminar"}
+                                      {saving ? "Enviando..." : "📱 Notificar Ausencia"}
                                     </button>
-                                  </div>
+                                  )}
+                                  <button
+                                    onClick={() => downloadQr(s.matricula, s.nombre)}
+                                    className="flex-1 px-4 py-2 border border-gray-300 rounded-md text-sm text-gray-700 hover:bg-gray-50"
+                                    disabled={qrGenerating}
+                                  >
+                                    {qrGenerating ? "Generando..." : "⬇️ Descargar QR"}
+                                  </button>
+                                  <button
+                                    onClick={() => deleteStudent(s.matricula)}
+                                    className="flex-1 px-4 py-2 border border-red-500 rounded-md text-sm text-red-600 hover:bg-red-50 font-medium"
+                                    disabled={saving}
+                                  >
+                                    {saving ? "Eliminando..." : "🗑️ Eliminar"}
+                                  </button>
                                 </div>
 
                                 {/* Historial de asistencias */}
                                 <div>
-                                  <h4 className="font-medium mb-3 text-lg">Historial de asistencias</h4>
-                                  <div className="max-h-60 overflow-y-auto border rounded-lg bg-white">
+                                  <h4 className="font-medium mb-3 text-base">Historial de asistencias</h4>
+                                  <div className="max-h-48 sm:max-h-60 overflow-y-auto border rounded-lg bg-gray-50">
                                     {s.asistencias?.length === 0 ? (
-                                      <div className="text-center py-8 text-gray-500">
-                                        <p>Sin registros de asistencia</p>
-                                        <p className="text-sm mt-1">Las asistencias aparecerán aquí cuando el alumno se registre</p>
+                                      <div className="text-center py-6 text-gray-500 px-4">
+                                        <p className="text-sm">Sin registros de asistencia</p>
+                                        <p className="text-xs mt-1">Las asistencias aparecerán aquí cuando el alumno se registre</p>
                                       </div>
                                     ) : (
                                       <div className="divide-y">
                                         {[...(s.asistencias || [])].reverse().map((a, i) => (
-                                          <div key={i} className="flex justify-between items-center p-3 hover:bg-gray-50">
-                                            <div className="flex items-center">
-                                              <span className="w-2 h-2 bg-green-500 rounded-full mr-3"></span>
-                                              <span className="font-medium">{a.fecha}</span>
+                                          <div key={i} className="flex justify-between items-center p-3 hover:bg-gray-100 transition-colors">
+                                            <div className="flex items-center min-w-0 flex-1">
+                                              <span className="w-2 h-2 bg-green-500 rounded-full mr-3 flex-shrink-0"></span>
+                                              <span className="font-medium text-sm truncate">{a.fecha}</span>
                                             </div>
-                                            <span className="text-sm text-gray-500 bg-gray-100 px-2 py-1 rounded">
+                                            <span className="text-xs text-gray-500 bg-white px-2 py-1 rounded border ml-2 flex-shrink-0">
                                               {a.hora}
                                             </span>
                                           </div>
@@ -1113,7 +1147,6 @@
         )}
       </div> 
     );
-  }
 
   function AddStudentForm({ onCancel, onSave, isSubmitting }) {
     const [matricula, setMatricula] = useState("");
@@ -1240,3 +1273,4 @@
       </form>
     );
   }
+}
