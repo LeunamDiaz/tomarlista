@@ -328,7 +328,7 @@ export default function Home() {
       } finally {
         setSaving(false);
       }
-    }, [students, testRefreshEnabled]);
+    }, [students, testRefreshEnabled, saving]);
 
   // ===== AUTHENTICATION FUNCTIONS =====
   // 🔹 Login admin mejorado
@@ -1410,7 +1410,7 @@ export default function Home() {
                       <div className="text-4xl mb-2">📱</div>
                       <h3 className="font-semibold text-blue-800 mb-2">Instrucciones</h3>
                       <p className="text-blue-700 text-sm">
-                        1. Haz clic en "Iniciar Escáner" para activar la cámara<br/>
+                        1. Haz clic en &quot;Iniciar Escáner&quot; para activar la cámara<br/>
                         2. Apunta la cámara al código QR del estudiante<br/>
                         3. El sistema registrará automáticamente la asistencia
                       </p>
