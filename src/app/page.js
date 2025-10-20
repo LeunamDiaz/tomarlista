@@ -917,7 +917,7 @@ export default function Home() {
                         className="flex-1 sm:flex-none px-4 py-2 border rounded-md bg-green-500 text-white hover:bg-green-600 text-sm font-medium"
                         disabled={saving}
                       >
-                        📄 Exportar PDF
+                        📄 Exportar 
                       </button>
                     </div>
 
