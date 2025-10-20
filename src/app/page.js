@@ -68,6 +68,10 @@ export default function Home() {
   const [scanCooldownTime, setScanCooldownTime] = useState(0);
   const [scanResult, setScanResult] = useState(null); // 'success' | 'already_registered' | null
   const [scannedStudentName, setScannedStudentName] = useState('');
+  const [scannerStarted, setScannerStarted] = useState(false);
+  const [currentCameraId, setCurrentCameraId] = useState(null);
+  const [availableCameras, setAvailableCameras] = useState([]);
+  const [scannerError, setScannerError] = useState(null);
 
   // ===== UTILITY FUNCTIONS =====
   // Export PDF function
@@ -665,63 +669,147 @@ export default function Home() {
       console.warn("Error del scanner:", error);
     }, []);
 
-    // Inicializar scanner cuando se abre el modal MEJORADO
+    // Obtener cámaras disponibles
+    const getAvailableCameras = useCallback(async () => {
+      try {
+        const { Html5Qrcode } = await import("html5-qrcode");
+        const cameras = await Html5Qrcode.getCameras();
+        setAvailableCameras(cameras);
+        
+        // Buscar cámara trasera por defecto
+        const backCamera = cameras.find(camera => 
+          camera.label.toLowerCase().includes('back') || 
+          camera.label.toLowerCase().includes('rear') ||
+          camera.label.toLowerCase().includes('environment')
+        );
+        
+        if (backCamera) {
+          setCurrentCameraId(backCamera.id);
+        } else if (cameras.length > 0) {
+          setCurrentCameraId(cameras[0].id);
+        }
+      } catch (error) {
+        console.error("Error obteniendo cámaras:", error);
+        setScannerError("No se pudieron detectar las cámaras disponibles");
+      }
+    }, []);
+
+    // Inicializar scanner cuando se abre el modal
     useEffect(() => {
       if (scannerOpen) {
-        // Limpiar cualquier scanner previo antes de crear uno nuevo
+        // Limpiar cualquier scanner previo
         if (window.currentScanner) {
           try {
-            window.currentScanner.clear();
-            window.currentScanner = null;
+            window.currentScanner.stop().then(() => {
+              window.currentScanner.clear();
+              window.currentScanner = null;
+            }).catch(() => {
+              window.currentScanner.clear();
+              window.currentScanner = null;
+            });
           } catch (error) {
             console.warn("Error limpiando scanner previo:", error);
           }
         }
         
-        // Importar y configurar el scanner
-        const initScanner = async () => {
-          try {
-            const { Html5QrcodeScanner } = await import("html5-qrcode");
-            
-            const scanner = new Html5QrcodeScanner('reader', { 
-              qrbox: {
-                width: 250,
-                height: 250,
-              },
-              fps: 10, // Reducido para mejor rendimiento
-              // 👇 ESTA ES LA CLAVE para la cámara trasera
-              camera: { 
-                facingMode: "environment" 
-              },
-            });
-
-            scanner.render(onScanSuccess, onScanFailure);
-            
-            // Guardar referencia del scanner para poder limpiarlo
-            window.currentScanner = scanner;
-            console.log("Scanner inicializado correctamente");
-          } catch (error) {
-            console.error("Error al cargar el scanner:", error);
-            toast.error("Error al cargar el escáner QR. Intente nuevamente.");
-            setScannerOpen(false);
-          }
-        };
-
-        // Pequeño delay para asegurar que el DOM esté listo
-        setTimeout(initScanner, 100);
+        // Obtener cámaras disponibles
+        getAvailableCameras();
+        setScannerError(null);
+        setScannerStarted(false);
       } else {
         // Limpiar scanner cuando se cierra el modal
         if (window.currentScanner) {
           try {
-            window.currentScanner.clear();
-            window.currentScanner = null;
-            console.log("Scanner limpiado al cerrar modal");
+            window.currentScanner.stop().then(() => {
+              window.currentScanner.clear();
+              window.currentScanner = null;
+            }).catch(() => {
+              window.currentScanner.clear();
+              window.currentScanner = null;
+            });
           } catch (error) {
             console.warn("Error al limpiar scanner:", error);
           }
         }
+        setScannerStarted(false);
+        setScannerError(null);
       }
-    }, [scannerOpen, onScanSuccess, onScanFailure]);
+    }, [scannerOpen, getAvailableCameras]);
+
+    // Función para iniciar el escáner
+    const startScanner = useCallback(async () => {
+      if (!currentCameraId) {
+        setScannerError("No hay cámara seleccionada");
+        return;
+      }
+
+      try {
+        setScannerError(null);
+        const { Html5Qrcode } = await import("html5-qrcode");
+        
+        const scanner = new Html5Qrcode('reader');
+        
+        const config = {
+          fps: 10,
+          qrbox: { width: 250, height: 250 },
+          aspectRatio: 1.0
+        };
+
+        await scanner.start(
+          currentCameraId,
+          config,
+          onScanSuccess,
+          onScanFailure
+        );
+
+        window.currentScanner = scanner;
+        setScannerStarted(true);
+        console.log("Scanner iniciado correctamente");
+      } catch (error) {
+        console.error("Error iniciando scanner:", error);
+        setScannerError("Error al iniciar la cámara. Verifique los permisos.");
+      }
+    }, [currentCameraId, onScanSuccess, onScanFailure]);
+
+    // Función para detener el escáner
+    const stopScanner = useCallback(async () => {
+      if (window.currentScanner) {
+        try {
+          await window.currentScanner.stop();
+          window.currentScanner.clear();
+          window.currentScanner = null;
+          setScannerStarted(false);
+          console.log("Scanner detenido");
+        } catch (error) {
+          console.warn("Error deteniendo scanner:", error);
+        }
+      }
+    }, []);
+
+    // Función para cambiar de cámara
+    const switchCamera = useCallback(async () => {
+      if (!scannerStarted || availableCameras.length <= 1) return;
+      
+      try {
+        // Detener scanner actual
+        await stopScanner();
+        
+        // Encontrar siguiente cámara
+        const currentIndex = availableCameras.findIndex(cam => cam.id === currentCameraId);
+        const nextIndex = (currentIndex + 1) % availableCameras.length;
+        const nextCamera = availableCameras[nextIndex];
+        
+        setCurrentCameraId(nextCamera.id);
+        
+        // Reiniciar con nueva cámara
+        setTimeout(() => {
+          startScanner();
+        }, 500);
+      } catch (error) {
+        console.error("Error cambiando cámara:", error);
+        setScannerError("Error al cambiar de cámara");
+      }
+    }, [scannerStarted, availableCameras, currentCameraId, stopScanner, startScanner]);
 
   // ===== COMPUTED VALUES =====
   // 🔹 Memoizar cálculos para mejor rendimiento
@@ -856,10 +944,10 @@ export default function Home() {
                   <button
                     type="button"
                     onClick={() => setScannerOpen(true)}
-                    className="w-full px-6 py-3 border-2 border-green-500 text-green-600 rounded-lg hover:bg-green-50 font-semibold text-lg transition-colors"
+                    className="w-full px-6 py-3 bg-green-500 text-white rounded-lg hover:bg-green-600 font-semibold text-lg transition-colors shadow-lg"
                     disabled={saving}
                   >
-                    📷 Escanear QR
+                    📷 Escanear Código QR
                   </button>
                 </div>
 
@@ -1251,21 +1339,95 @@ export default function Home() {
             )}
             
             <div className="w-full h-full flex flex-col items-center justify-center p-4">
-              <div className="text-center mb-6">
+              {/* Header del escáner */}
+              <div className="text-center mb-6 w-full max-w-2xl">
                 <h1 className="text-2xl font-bold mb-2">📷 Escáner de Código QR</h1>
-                <p className="text-gray-600">Apunta la cámara al código QR del estudiante para registrar su asistencia</p>
+                <p className="text-gray-600 mb-4">Apunta la cámara al código QR del estudiante para registrar su asistencia</p>
                 
-                {/* Botón de salir movido aquí */}
-                <button
-                  onClick={() => setScannerOpen(false)}
-                  className="mt-4 px-6 py-3 bg-red-600 text-white rounded-lg shadow-lg hover:bg-red-700 transition-colors font-medium"
-                >
-                  ✕ Cerrar Escáner
-                </button>
+                {/* Controles del escáner */}
+                <div className="flex flex-col sm:flex-row gap-3 justify-center items-center mb-4">
+                  {!scannerStarted ? (
+                    <button
+                      onClick={startScanner}
+                      disabled={!currentCameraId || scannerError}
+                      className="px-6 py-3 bg-green-600 text-white rounded-lg shadow-lg hover:bg-green-700 transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      🎥 Iniciar Escáner
+                    </button>
+                  ) : (
+                    <button
+                      onClick={stopScanner}
+                      className="px-6 py-3 bg-red-600 text-white rounded-lg shadow-lg hover:bg-red-700 transition-colors font-medium"
+                    >
+                      ⏹️ Detener Escáner
+                    </button>
+                  )}
+                  
+                  {availableCameras.length > 1 && (
+                    <button
+                      onClick={switchCamera}
+                      disabled={!scannerStarted}
+                      className="px-4 py-3 bg-blue-600 text-white rounded-lg shadow-lg hover:bg-blue-700 transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      🔄 Cambiar Cámara
+                    </button>
+                  )}
+                  
+                  <button
+                    onClick={() => setScannerOpen(false)}
+                    className="px-4 py-3 bg-gray-600 text-white rounded-lg shadow-lg hover:bg-gray-700 transition-colors font-medium"
+                  >
+                    ✕ Cerrar
+                  </button>
+                </div>
+                
+                {/* Información de la cámara actual */}
+                {currentCameraId && (
+                  <div className="text-sm text-gray-500 mb-2">
+                    📹 Cámara: {availableCameras.find(cam => cam.id === currentCameraId)?.label || 'Cámara seleccionada'}
+                  </div>
+                )}
+                
+                {/* Mostrar errores del escáner */}
+                {scannerError && (
+                  <div className="bg-red-50 border border-red-200 rounded-lg p-3 mb-4">
+                    <div className="flex items-center">
+                      <span className="text-red-500 mr-2">⚠️</span>
+                      <p className="text-red-700 text-sm">{scannerError}</p>
+                    </div>
+                  </div>
+                )}
               </div>
               
-              <div id="reader" className="w-full max-w-2xl"></div>
-              <div id="result" className="text-center text-lg mt-6 p-4 bg-gray-100 rounded-lg max-w-2xl"></div>
+              {/* Área del escáner */}
+              <div className="w-full max-w-2xl">
+                <div id="reader" className="w-full border-2 border-dashed border-gray-300 rounded-lg overflow-hidden"></div>
+                
+                {/* Instrucciones cuando no está iniciado */}
+                {!scannerStarted && !scannerError && (
+                  <div className="mt-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                    <div className="text-center">
+                      <div className="text-4xl mb-2">📱</div>
+                      <h3 className="font-semibold text-blue-800 mb-2">Instrucciones</h3>
+                      <p className="text-blue-700 text-sm">
+                        1. Haz clic en "Iniciar Escáner" para activar la cámara<br/>
+                        2. Apunta la cámara al código QR del estudiante<br/>
+                        3. El sistema registrará automáticamente la asistencia
+                      </p>
+                    </div>
+                  </div>
+                )}
+                
+                {/* Estado del escáner */}
+                {scannerStarted && (
+                  <div className="mt-4 p-3 bg-green-50 border border-green-200 rounded-lg">
+                    <div className="flex items-center justify-center">
+                      <div className="w-3 h-3 bg-green-500 rounded-full animate-pulse mr-2"></div>
+                      <span className="text-green-700 font-medium">Escáner activo - Buscando códigos QR...</span>
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         )}
