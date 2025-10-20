@@ -672,7 +672,14 @@ export default function Home() {
     // Obtener cámaras disponibles
     const getAvailableCameras = useCallback(async () => {
       try {
-        const { Html5Qrcode } = await import("html5-qrcode");
+        // Importación dinámica con manejo de errores mejorado
+        const html5QrcodeModule = await import("html5-qrcode");
+        const Html5Qrcode = html5QrcodeModule.Html5Qrcode || html5QrcodeModule.default;
+        
+        if (!Html5Qrcode) {
+          throw new Error("Html5Qrcode no está disponible");
+        }
+        
         const cameras = await Html5Qrcode.getCameras();
         setAvailableCameras(cameras);
         
@@ -745,7 +752,13 @@ export default function Home() {
 
       try {
         setScannerError(null);
-        const { Html5Qrcode } = await import("html5-qrcode");
+        // Importación dinámica con manejo de errores mejorado
+        const html5QrcodeModule = await import("html5-qrcode");
+        const Html5Qrcode = html5QrcodeModule.Html5Qrcode || html5QrcodeModule.default;
+        
+        if (!Html5Qrcode) {
+          throw new Error("Html5Qrcode no está disponible");
+        }
         
         const scanner = new Html5Qrcode('reader');
         
